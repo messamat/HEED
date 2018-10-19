@@ -1,6 +1,8 @@
 library(ggplot2)
 library(data.table)
 library(stringr)
+library(sp)
+library(leaflet)
 
 #Import data
 setwd('C:/Mathis/SAFS/HEED') ##UPDATE##
@@ -114,6 +116,19 @@ multiformat <- function(data, pattern) {
   flevels <- data.frame(variable=qcols, levels=colind-min(colind)+1)
   qmelt <- qmelt[flevels, on='variable']
   return(qmelt[,value := factor(value, levels = unique(qmelt$value[order(qmelt$levels)]))])
+}
+
+multiAhisto <- function(data, pattern, title, xaxis) {
+  qmelt <- multiformat(data, pattern)
+  p <- ggplot(qmelt[!is.na(value) & !(value %in% c('Other (please specify)')) & value!='',], aes(x=value)) + 
+    geom_histogram(stat="count") + 
+    scale_x_discrete(expand=c(0,0), name=xaxis) + 
+    scale_y_continuous(expand=c(0,0)) + 
+    ggtitle(paste(title, 'Number of respondents: ', 
+                  length(qmelt[!is.na(value) & value!='', unique(ResponseId)]), '/', data[, .N])) + 
+    theme_classic() +
+    theme(axis.text.x = element_text(angle=10, vjust=0.5))
+  return(p)
 }
 
 ################ Q2.2 - How many classes do you teach? ################
@@ -362,11 +377,50 @@ heedteach[grep('(u[.]*s[.]*a*$)|(united.*states)', heedteach$X1_Q11.2, ignore.ca
 singleAplot(heedteach, 'X1_Q11.2', 'Country where the ecological data are/were collected') +
   theme(axis.text.x = element_text(angle=40, vjust=0.5))
 
+################ Q11.3 - Please drag the pin to the field location as precisely as possible in the map below ##############
+heedteach[, c('lat', 'long') := tstrsplit(X1_Q11.3, ',', fixed=T),]
+heedteach[, long := as.numeric(str_extract(long, "[-+]?\\d+(\\.\\d+)?")),]
+heedteach[, lat := as.numeric(str_extract(lat, "[-+]?\\d+(\\.\\d+)?")),]
+heedteach[lat==-99 | long==-99, `:=`(lat=NA, long=NA)]
 
+
+flocs <- SpatialPoints(data.frame(heedteach[!is.na(long),long],heedteach[!is.na(long),lat]))
+leaflet(data = flocs) %>% addTiles() %>%
+  addMarkers(clusterOptions = markerClusterOptions())
+
+################ Q11.4 - Please drag the pin to the field location as precisely as possible in the map below ##############
+table(heedteach$X1_Q11.4_1)
+heedteach[,X1_Q11.4_2:=substr(X1_Q11.4_2, 1,25)]
+ggplot(heedteach, aes(x=X1_Q11.4_1, fill=X1_Q11.4_2)) + 
+  geom_histogram(stat="count") + 
+  scale_x_discrete(name='Ecosystem') + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=15, vjust=0.6))
+
+################ Q12.2 - What type(s) of variables are/were collected during the field excursion(s)?  ##############
+multiAhisto(heedteach, pattern= 'Q12.2', title='Q12.2 - What type(s) of variables are/were collected during the field excursion(s)?',
+            xaxis = 'Data type')
+
+multiAhisto(heedteach, pattern= 'Q12.3', title='Q12.3 - What type(s) of variables are/were collected during the field excursion(s)?',
+            xaxis = 'Data type') + theme(axis.text.x = element_text(angle=15))
+multiAhisto(heedteach, pattern= 'Q12.4', title='Q12.3 - What type(s) of variables are/were collected during the field excursion(s)?',
+            xaxis = 'Data type') + theme(axis.text.x = element_text(angle=30))
+multiAhisto(heedteach, pattern= 'Q12.5', title='Q12.3 - What type(s) of variables are/were collected during the field excursion(s)?',
+            xaxis = 'Data type')  + theme(axis.text.x = element_text(angle=30))
+#axis.ticks.length = unit(1, "cm")
+
+################ Q13.2 - Did you collect the data with the intention to study a specific threat to the factors of interest/environment?  ##############
+singleAplot(heedteach, col='Q13.2', title='Did you collect the data with the intention to study a specific threat', unit='bla')
+
+################ Q13.3 - What threat(s) is/was the data collection intended to study?  ##############
+multiAhisto(heedteach, pattern= 'Q13.3', title='Q13.3 -  What threat(s) is/was the data collection intended to study',
+            xaxis = 'Threat')  + theme(axis.text.x = element_text(angle=0)) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15))
 
 
 
 #q15.5 NOT DISPLAYED TO THOSE WHO PRESSED > 10 PUBLICATIONS
+
 
 
 #Check ratio of instructor to students
