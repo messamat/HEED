@@ -96,7 +96,7 @@ histoplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
 
 singleAplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
   data <- setDT(data)
-  p <- ggplot(data, aes_string(col)) + 
+  p <- ggplot(data[get(col)!=-99,], aes_string(col)) + 
     geom_histogram(stat="count") + 
     scale_x_discrete(expand=c(0,0), name='') + 
     scale_y_continuous(expand=c(0,0)) + 
@@ -337,22 +337,31 @@ check <- heedteach[(Q10.5_5_TEXT != "" & Q10.5_5_TEXT != '-99') |
 check$Q10.5_5_TEXT
 heedteach[(Q10.5_5_TEXT) %in% c('Permit',"I don't know"),
           `:=`(Q10.5_5 = '-99', Q10.5_5_TEXT = '-99')]
+heedteach[(Q10.5_5_TEXT) %in% c('Additional background data', "Background information, show-and-tell visits"),
+          `:=`(Q10.5_5 = '-99', Q10.5_5_TEXT = 'Background data/Training')]
+heedteach[(Q10.5_5_TEXT) %in% c('waived camping fees'),
+          `:=`(Q10.5_5 = '-99', Q10.5_5_TEXT = '-99', Q10.5_4= 'Financial support')]
+heedteach[(Q10.5_5_TEXT) %in% c('Access with user fees'),
+          `:=`(Q10.5_5 = '-99', Q10.5_5_TEXT = '-99', Q10.5_1= 'Access to field location')]
 
 
-
-heedteach[(Q10.4_9_TEXT) %in% c('Additional background data', "Background information, show-and-tell visits lab for processing samples"),
-          `:=`(Q1.5_5 = '-99', Q10.5_5 = 'Background data/Training')]
-
-
-q10_4_melt <- multiformat(heedteach, pattern='Q10.4')
-ggplot(q10_4_melt[!is.na(value) & !(value %in% c('Other (please specify)')),], aes(x=value)) + 
+q10_5_melt <- multiformat(heedteach, pattern='Q10.5')
+ggplot(q10_5_melt[!is.na(value) & !(value %in% c('Other (please specify)')) & value!='',], aes(x=value)) + 
   geom_histogram(stat="count") + 
   scale_x_discrete(expand=c(0,0), name='Institution') + 
   scale_y_continuous(expand=c(0,0)) + 
-  ggtitle(paste('Q10.4 - Does/did an organization outside of your higher-education institution provide some level of support? Number of respondents: ', 
-                length(q10_4_melt[!is.na(value), unique(ResponseId)]), '/', heedteach[, .N])) + 
+  ggtitle(paste('Q10.5 - What type of support do/did these partner organizations provide? Number of respondents: ', 
+                length(q10_5_melt[!is.na(value) & value!='', unique(ResponseId)]), '/', heedteach[, .N])) + 
   theme_classic() +
   theme(axis.text.x = element_text(angle=10, vjust=0.5))
+
+################ Q11.2 - country where the ecological data are/were collected ##############
+heedteach[grep('(u[.]*s[.]*a*$)|(united.*states)', heedteach$X1_Q11.2, ignore.case = TRUE),
+          X1_Q11.2 := 'USA']
+
+singleAplot(heedteach, 'X1_Q11.2', 'Country where the ecological data are/were collected') +
+  theme(axis.text.x = element_text(angle=40, vjust=0.5))
+
 
 
 
