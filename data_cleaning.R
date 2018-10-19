@@ -4,7 +4,7 @@ library(stringr)
 
 #Import data
 setwd('C:/Mathis/SAFS/HEED') ##UPDATE##
-heed <-read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_10.34.csv')
+heed <-read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_text.csv')
 
 #Dataframe of questions
 qs <- t(heed[1:2,])
@@ -65,7 +65,58 @@ write.csv(heednoteach, 'results/heededit_noteach.csv')
 #_________________________________________________________________________
 heedteach$flag <- 0
 
-################ Q2.2 How many classes do you teach? ################
+################################## Plot functions ###############################################
+histoplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
+  setDT(data)
+  meacol <- data[,mean(get(col), na.rm=T)]
+  medcol <- data[,median(get(col), na.rm=T)]
+  p <- ggplot(data, aes_string(x=col)) + 
+    geom_histogram(binwidth=binw) +
+    scale_x_continuous(expand=c(0,0), name=paste0('Number of ',unit)) + 
+    scale_y_continuous(expand=c(0,0)) + 
+    geom_vline(xintercept=meacol) + 
+    annotate("text", x=meacol-binw/5, y=Inf, hjust=1.2, angle=90,
+             label = paste('Mean:',round(meacol), unit)) +
+    geom_vline(xintercept=medcol) + 
+    annotate("text", x=medcol-binw/5, y=Inf, hjust=1.2,  angle=90,
+             label = paste('Median:',round(medcol), unit)) +
+    ggtitle(paste(title, 'Number of respondents:', 
+                  data[!is.na(get(col)) & get(col)!=-99, .N], '/', data[, .N])) + 
+    theme_classic()
+  if (checkNA) {
+    maxcol <- max(data[,get(col)], na.rm=T)
+    valrange <- seq(min(data[,get(col)], na.rm=T),maxcol, by=binw)
+    p <- p + scale_x_continuous(breaks=c(valrange[-length(valrange)], maxcol), 
+                                labels=c(valrange[-length(valrange)],paste0('>',maxcol-1)),
+                                expand=c(0,0), name=paste0('Number of ',unit)) +
+      theme(axis.text.x = element_text(angle=90))
+  }
+  return(p)
+}
+
+singleAplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
+  data <- setDT(data)
+  p <- ggplot(data, aes_string(col)) + 
+    geom_histogram(stat="count") + 
+    scale_x_discrete(expand=c(0,0), name='') + 
+    scale_y_continuous(expand=c(0,0)) + 
+    ggtitle(paste(title, 'Number of respondents: ', 
+                  data[!is.na(get(col)) & get(col)!=-99, .N], '/', heedteach[, .N])) + 
+    theme_classic()
+  return(p)
+}
+
+multiformat <- function(data, pattern) {
+  colind <- grep(pattern, names(data))
+  qcols <- names(data)[colind]
+  data[, (qcols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = qcols]
+  qmelt <- melt(data, id.vars='ResponseId', measure.vars=qcols)
+  flevels <- data.frame(variable=qcols, levels=colind-min(colind)+1)
+  qmelt <- qmelt[flevels, on='variable']
+  return(qmelt[,value := factor(value, levels = unique(qmelt$value[order(qmelt$levels)]))])
+}
+
+################ Q2.2 - How many classes do you teach? ################
 heedteach[is.na(Q2.2_1), Q2.2_1 := 6] 
 ggplot(heedteach, aes(Q2.2_1)) + 
   geom_histogram() + 
@@ -92,17 +143,7 @@ heedteach[is.na(Q2.6_1), Q2.6_1 := 2019]
 heedteach[,ResponseId := factor(ResponseId, levels = unique(heedteach$ResponseId[order(heedteach$Q2.6_1, heedteach$Q2.5_1)]))]
 
 heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, dataduration := Q2.6_1-Q2.5_1]
-durahist <- ggplot(heedteach, aes(x=dataduration)) + 
-  geom_histogram(binwidth=1) +
-  scale_x_continuous(expand=c(0,0), name='Number of years of data') + 
-  scale_y_continuous(expand=c(0,0), name='') + 
-  geom_vline(xintercept=heedteach[,mean(dataduration, na.rm=T)]) + 
-  geom_text(aes(x=heedteach[,mean(dataduration, na.rm=T)]-1, y=15), 
-            label=paste0('Mean:',heedteach[,mean(dataduration, na.rm=T)], ' years'),angle=90) +
-  geom_vline(xintercept=heedteach[,median(dataduration, na.rm=T)]) + 
-  geom_text(aes(x=heedteach[,median(dataduration, na.rm=T)]-1, y=15), 
-            label=paste0('Median:',heedteach[,median(dataduration, na.rm=T)], ' years'),angle=90) +
-  theme_classic()
+durahist <- histoplot(heedteach, col='dataduration', title = '', unit='Years')
 
 ggplot(heedteach[Q2.5_1 != -99 & Q2.6_1 != -99,]) + 
   geom_segment(aes(x=Q2.5_1, xend=Q2.6_1, y=ResponseId, yend=ResponseId), size=1.2) +
@@ -192,21 +233,128 @@ ggplot(heedteach, aes(Q8.4_1)) +
   theme_classic()
 
 ################ Q9.2 - What is/was the total number of students participating in the field excursions in a typical year? ################
-check <- heedteach[Q8.4_1 %in% c(0,10, NA),]
+##qplot(heedteach$Q9.2_1)
 
-heedteach[is.na(Q8.4_1), Q8.4_1 := 11]
-heedteach[Q8.4_1 %in% c(0,11), flag:=flag+1]
-heedteach[Q8.4_1 == 0, Q8.4_1 := 1] 
-valrange <- do.call(seq, as.list(range(heedteach$Q8.4_1)))
-ggplot(heedteach, aes(Q8.4_1)) + 
-  geom_histogram() + 
-  scale_x_continuous(breaks=valrange, labels=c(valrange[-length(valrange)],paste0('>',valrange[length(valrange)-1])),
-                     expand=c(0,0), 
-                     name='Number of classes taught') + 
+check <- heedteach[Q9.2_1 %in% c(0,-99, NA),]
+heedteach[is.na(Q9.2_1), Q9.2_1 := 101]
+heedteach[Q9.2_1 %in% c(0,101), flag:=flag+1]
+
+print(histoplot(data=heedteach, col='Q9.2_1', 
+          title='Teaching Q9.2 - What is the number of students participating in the field excursions?',
+          unit='Students', binw=5))
+
+################ Q9.3 - In how many field excursions are/were ecological data collected during the class? ################
+#qplot(heedteach$Q9.3_1)
+
+check <- heedteach[Q9.3_1 %in% c(0,-99, NA),]
+heedteach[is.na(Q9.3_1), Q9.3_1 := max(heedteach$Q9.3_1, na.rm=T)+1]
+heedteach[Q9.3_1 %in% c(0,max(heedteach$Q9.3_1, na.rm=T)), flag:=flag+1]
+
+print(histoplot(data=heedteach, col='Q9.3_1', 
+                title='Teaching Q9.3 -  In how many field excursions are/were ecological data collected during the class?',
+                unit='Excursions', binw=1))
+
+################ Q9.4 - How many total days of ecological data collection are/were involved across all field excursions in a typical year? ################
+#qplot(heedteach$Q9.4_1)
+
+check <- heedteach[Q9.4_1 %in% c(0,-99, NA),]
+heedteach[is.na(Q9.4_1), Q9.4_1 := 31]
+heedteach[Q9.4_1==-99, Q9.4_1 := NA]
+heedteach[Q9.4_1 %in% c(NA, 0,max(heedteach$Q9.4_1, na.rm=T)), flag:=flag+1]
+
+print(histoplot(data=heedteach, col='Q9.4_1', 
+                title='Teaching Q9.4 -  How many total days of ecological data collection are/were involved across all field excursions?',
+                unit='Days', binw=2))
+
+################ Q9.5 - Across all field excursions, in how many locations does/did the class collect ecological data? ##############
+#qplot(heedteach$Q9.5_1)
+
+check <- heedteach[Q9.5_1 %in% c(0,-99, NA),]
+heedteach[is.na(Q9.5_1), Q9.5_1 := 51]
+heedteach[Q9.5_1==-99, Q9.5_1 := NA]
+heedteach[Q9.5_1 %in% c(NA, 0,max(heedteach$Q9.5_1, na.rm=T)), flag:=flag+1]
+
+print(histoplot(data=heedteach, col='Q9.5_1', 
+                title='Teaching Q9.5 -  Across all field excursions, in how many locations does/did the class collect ecological data?',
+                unit='Locations', binw=2))
+
+################ Q10.2 - What is/was the total cost of running the field excursion(s) for the class ($US) in a typical year? ##############
+#A bug in the survey: some weird condition made it in there? - we got no data
+
+################ Q10.3 - What are/were the typical funding sources to support the field excursion(s) costs? ##############
+check <- heedteach[(Q10.3_6_TEXT != "" & Q10.3_6_TEXT != '-99') |
+                     (Q10.3_7_TEXT != "" & Q10.3_7_TEXT != '-99'),] 
+
+grant_reclass<- c('grant funding','Project if possible', 'Scientific grants', 'Internal grant','Federal grant', 'Various projects')
+none_reclass <- c('I contributed my research lab equipment.', 'Field site was local (Botanic Garden on campus) so field excursion costs were minimal', 'none needed')
+course_reclass <- c('Course fees', 'Course fees and department support', 'Course fees')
+
+heedteach[(Q10.3_6_TEXT) %in% grant_reclass,`:=`(Q10.3_6 = '-99', Q10.3_6_TEXT = 'Grant')]
+heedteach[(Q10.3_7_TEXT) %in% grant_reclass,`:=`(Q10.3_7 = '-99', Q10.3_7_TEXT = 'Grant')]
+heedteach[(Q10.3_6_TEXT) %in% none_reclass,`:=`(Q10.3_6 = '-99', Q10.3_6_TEXT = 'None needed')]
+heedteach[(Q10.3_7_TEXT) %in% none_reclass,`:=`(Q10.3_7 = '-99', Q10.3_7_TEXT = 'None needed')]
+heedteach[(Q10.3_6_TEXT) %in% course_reclass,`:=`(Q10.3_6 = '-99', Q10.3_6_TEXT = '-99', 
+                                                  Q10.3_1 = 'University/academic department')]
+heedteach[(Q10.3_7_TEXT) %in% course_reclass,`:=`(Q10.3_7 = '-99', Q10.3_7_TEXT = '-99',
+                                                  Q10.3_1 = 'University/academic department')]
+heedteach[(Q10.3_6_TEXT) == 'Third party funding',`:=`(Q10.3_6 = '-99', Q10.3_6_TEXT = '-99', 
+                                                  Q10.3_2 = 'Outside organization(s)')]
+
+q10_3_melt <- multiformat(heedteach, pattern='Q10.3')
+ggplot(q10_3_melt[!is.na(value) & !(value %in% c('Other #1 (please specify)','Other #2 (please specify)')),], aes(x=value)) + 
+  geom_histogram(stat="count") + 
+  scale_x_discrete(expand=c(0,0), name='Source') + 
   scale_y_continuous(expand=c(0,0)) + 
-  ggtitle(paste('Teaching Q8.4: How many instructors are/were involved? Number of respondents: ', 
-                heedteach[!is.na(Q8.4_1) & Q8.4_1 != -99, .N], '/', heedteach[, .N])) + 
-  theme_classic()
+  ggtitle(paste('Q10.3 - What are/were the typical funding sources to support the field excursion(s) costs? Number of respondents: ', 
+                length(q10_3_melt[!is.na(value), unique(ResponseId)]), '/', heedteach[, .N])) + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=10, vjust=0.5))
+
+################ Q10.4 - Does/did an organization outside of your higher-education institution provide some level of support? ##############
+check <- heedteach[(Q10.4_9_TEXT != "" & Q10.4_9_TEXT != '-99') |
+                     (Q10.4_9_TEXT != "" & Q10.4_9_TEXT != '-99'),] 
+check$Q10.4_9_TEXT
+heedteach[(Q10.4_9_TEXT) %in% c('Conservation Management Institute at Virginia Tech', "I don't know"),
+          `:=`(Q10.4_9 = '-99', Q10.4_9_TEXT = '-99')]
+heedteach[(Q10.4_9_TEXT) %in% c('field station', "Federal Research Institute (academic, but not a university)"),
+          `:=`(Q10.4_9 = '-99', Q10.4_9_TEXT = '-99', Q10.4_2 = 'Another higher-education institution (e.g. university)')]
+
+
+q10_4_melt <- multiformat(heedteach, pattern='Q10.4')
+ggplot(q10_4_melt[!is.na(value) & !(value %in% c('Other (please specify)')),], aes(x=value)) + 
+  geom_histogram(stat="count") + 
+  scale_x_discrete(expand=c(0,0), name='Institution') + 
+  scale_y_continuous(expand=c(0,0)) + 
+  ggtitle(paste('Q10.4 - Does/did an organization outside of your higher-education institution provide some level of support? Number of respondents: ', 
+                length(q10_4_melt[!is.na(value), unique(ResponseId)]), '/', heedteach[, .N])) + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=10, vjust=0.5))
+
+################ Q10.5 - What type of support do/did these partner organizations provide? ##############
+#Check the one who keeps answering I don't know 
+check <- heedteach[(Q10.5_5_TEXT != "" & Q10.5_5_TEXT != '-99') |
+                     (Q10.5_5_TEXT != "" & Q10.5_5_TEXT != '-99'),] 
+check$Q10.5_5_TEXT
+heedteach[(Q10.5_5_TEXT) %in% c('Permit',"I don't know"),
+          `:=`(Q10.5_5 = '-99', Q10.5_5_TEXT = '-99')]
+
+
+
+heedteach[(Q10.4_9_TEXT) %in% c('Additional background data', "Background information, show-and-tell visits lab for processing samples"),
+          `:=`(Q1.5_5 = '-99', Q10.5_5 = 'Background data/Training')]
+
+
+q10_4_melt <- multiformat(heedteach, pattern='Q10.4')
+ggplot(q10_4_melt[!is.na(value) & !(value %in% c('Other (please specify)')),], aes(x=value)) + 
+  geom_histogram(stat="count") + 
+  scale_x_discrete(expand=c(0,0), name='Institution') + 
+  scale_y_continuous(expand=c(0,0)) + 
+  ggtitle(paste('Q10.4 - Does/did an organization outside of your higher-education institution provide some level of support? Number of respondents: ', 
+                length(q10_4_melt[!is.na(value), unique(ResponseId)]), '/', heedteach[, .N])) + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=10, vjust=0.5))
+
+
 
 
 #q15.5 NOT DISPLAYED TO THOSE WHO PRESSED > 10 PUBLICATIONS
