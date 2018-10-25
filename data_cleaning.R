@@ -1,3 +1,4 @@
+#+ fig.width=10, fig.height=6, dpi=300, out.width="1920px",out.height="1080px"
 library(ggplot2)
 library(data.table)
 library(stringr)
@@ -7,22 +8,28 @@ library(leaflet)
 #Import data
 setwd('C:/Mathis/SAFS/HEED') ##UPDATE##
 heed <-read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_text.csv')
+heednum <- read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_numeric.csv')
 
 #Dataframe of questions
-qs <- t(heed[1:2,])
+qs <- as.data.frame(t(heed[1:2,]))
 row.names(qs) <- colnames(heed)
 heed <- heed[3:nrow(heed),]
+heednum <- heednum[3:nrow(heednum),]
 
 #Keep responses that are at least 80% finished
 heed$Progress <- as.numeric(as.character(heed$Progress))
 heedsel <- heed[(heed$Finished==T | heed$Progress>80) & heed$Q1.2=='Yes' & #Consented to taking the survey
                   !(heed$Q2.1 == 'No' & heed$Q3.1 == 'No'),] #Are at least interest in teaching a class
 nrow(heedsel[heedsel$Q2.1=='Yes',])
-write.csv(heedsel, 'results/heedsel.csv')
+write.csv(heedsel, 'results/heedsel.csv', row.names = F)
 
 #Went through every response manually to check whether toggle bars with -99 were untouched or checked the 'NA' button
 heededit <- read.csv('data/heedsel_edit_20181018.csv')
 
+#Check number of respondents and countries
+length(unique(heededit$ResponseId))
+length(heededit[heededit$Q20.2_1 != '-99', 'Q20.2_1'])
+length(unique(heededit[heededit$Q20.2_1 != '-99', 'Q20.2_1']))
 
 #Check out date/time of survey completion
 str(heededit)
@@ -59,8 +66,14 @@ LLduplis <- heededit[paste(heededit$LocationLatitude, heededit$LocationLongitude
 #Subset respondents according to main branch (teaching a class versus interested in teaching a class)
 heedteach <- setDT(heededit[heededit$Q2.1=='Yes',c(1:20,83:(ncol(heededit)))])
 heednoteach <- setDT(heededit[heededit$Q2.1=='No',c(1:15,21:82)])
-write.csv(heedteach, 'results/heededit_teach.csv')
-write.csv(heednoteach, 'results/heededit_noteach.csv')
+write.csv(heedteach, 'results/heededit_teach.csv', row.names = F)
+write.csv(heednoteach, 'results/heededit_noteach.csv', row.names = F)
+
+#subset rows and columns in numeric results to match the text version (heedteach and heednoteach)
+heednumteach <- setDT(heednum)[ResponseId %in% heedteach$ResponseId,
+                               colnames(heednum) %in% colnames(heedteach), with=FALSE] 
+heednumnoteach <- setDT(heednum)[ResponseId %in% heednoteach$ResponseId,
+                               colnames(heednum) %in% colnames(heednoteach), with=FALSE] 
 
 #_________________________________________________________________________
 # QA/QC DATA FOR THOSE SURVEY RESPONDENTS THAT EACH A FIELD-BASED CLASS #
@@ -129,6 +142,56 @@ multiAhisto <- function(data, pattern, title, xaxis) {
     theme_classic() +
     theme(axis.text.x = element_text(angle=10, vjust=0.5))
   return(p)
+}
+
+likertformat <- function(datatext, datanum, pattern, qstext=qs) {
+  datnumformat <- multiformat(datanum, pattern)
+  datnumformat$value <- as.numeric(as.character(datnumformat$value))-1
+  dattextformat <- multiformat(datatext, pattern)
+  datjoin <- datnumformat[dattextformat, on=c('ResponseId', 'variable')]
+  rowind <- grep(pattern, rownames(qstext))
+  qslikert <- data.frame(choices = tstrsplit(qstext[rowind, '1'], '-', fixed=T)[[2]])
+  qslikert$levels <- as.numeric(rownames(qslikert))
+  datjoinq <- datjoin[qslikert, on='levels']
+  datjoinq[!is.na(value), `:=`(varmean=mean(value), N=.N), by = variable]
+  return(datjoinq[, `:=`(variable=factor(variable,levels= unique(datjoinq$variable[order(-datjoinq$varmean)])),
+                         choices= factor(choices, levels=unique(datjoinq$choices[order(-datjoinq$varmean)])))]) 
+}
+
+likertboxplot <- function(dataformat, pattern, qstext=qs) {
+  title <- tstrsplit(qstext[rownames(qstext) == dataformat$variable[1], 1], '_', fixed=T)[[1]]
+  p <- ggplot(dataformat, aes(x=variable, y=value)) + 
+    geom_boxplot(draw_quantiles = c(0.25, 0.5, 0.75)) + 
+    geom_point(aes(y=varmean), color='red', size=3, shape=18) + 
+    geom_text(aes(y=varmean-0.1, label = paste0('Mean:',round(varmean,1), ' (n=', N,')'))) +
+    scale_x_discrete(labels = str_wrap(levels(dataformat$choices), width=10))+
+    scale_y_continuous(name= 'Response', expand=c(0,0), breaks=unique(dataformat$value), 
+                       labels=paste0(unique(dataformat$i.value), ' (', unique(dataformat$value),')')) +
+    theme_classic() + 
+    theme(axis.title.x = element_blank()) +
+    ggtitle(title)
+  print(p)
+}
+
+likertstackedbar <- function(dataformat, qstext=qs) {
+  title <- tstrsplit(qstext[rownames(qstext) == dataformat$variable[1], 1], '_', fixed=T)[[1]]
+  
+  dataformat_summary <- dataformat[!is.na(value),{
+    tot = .N
+    .SD[,.(frac=.N/tot),by=value]
+  },by=variable]
+  dataformat_summaryattri <- dataformat_summary[unique(dataformat[,.(variable, value, i.value, choices, varmean, N)]),
+                                                on= c('variable','value'), nomatch=0]
+  
+  p <- ggplot(dataformat_summaryattri[order(c(value,frac))], (aes(x=variable, y=frac, fill=value))) +
+    geom_bar(stat="identity") + 
+    scale_x_discrete(labels = str_wrap(paste0(levels(dataformat$choices),' (',
+                                              unique(dataformat_summaryattri[order(-varmean), .(variable,N)])$N,')'), width=10)) +
+    scale_y_continuous(name= 'Response', expand=c(0,0)) +
+    theme_classic() + 
+    theme(axis.title.x = element_blank()) +
+    ggtitle(title)
+  print(p)
 }
 
 ################ Q2.2 - How many classes do you teach? ################
@@ -415,12 +478,22 @@ singleAplot(heedteach, col='Q13.2', title='Did you collect the data with the int
 ################ Q13.3 - What threat(s) is/was the data collection intended to study?  ##############
 multiAhisto(heedteach, pattern= 'Q13.3', title='Q13.3 -  What threat(s) is/was the data collection intended to study',
             xaxis = 'Threat')  + theme(axis.text.x = element_text(angle=0)) +
-  scale_x_discrete(labels = function(x) str_wrap(x, width = 15))
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))
+
+################ Q15.2 - What benefits do you think your students gain/gained from collecting and working with the class' ecological dataset? ########
+q15_2format <- likertformat(heedteach, heednumteach, 'Q15[.]2.*[^TEXT]$')
+likertboxplot(q15_2format)
+likertstackedbar(q15_2format)
+
+
 
 
 
 #q15.5 NOT DISPLAYED TO THOSE WHO PRESSED > 10 PUBLICATIONS
 
 
+singleAplot(heedteach, 'Q18.3', 'Do you currently share the data collected as part of this class?', unit='CUREs')
+table(heedteach$Q18.3)
+multiAhisto(heedteach, 'Q18.4', 'At what level(s) do you currently share your data?', xaxis='Choice')
 
 #Check ratio of instructor to students
