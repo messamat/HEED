@@ -4,6 +4,8 @@ library(data.table)
 library(stringr)
 library(sp)
 library(leaflet)
+library(knitr)
+library(kableExtra)
 
 #Import data
 setwd('C:/Mathis/SAFS/HEED') ##UPDATE##
@@ -24,6 +26,7 @@ nrow(heedsel[heedsel$Q2.1=='Yes',])
 write.csv(heedsel, 'results/heedsel.csv', row.names = F)
 
 #Went through every response manually to check whether toggle bars with -99 were untouched or checked the 'NA' button
+#Left cases where didn't touch the toggle bar to -99, otherwise, changed to NA
 heededit <- read.csv('data/heedsel_edit_20181018.csv')
 
 #Check number of respondents and countries
@@ -81,7 +84,7 @@ heednumnoteach <- setDT(heednum)[ResponseId %in% heednoteach$ResponseId,
 heedteach$flag <- 0
 
 ################################## Plot functions ###############################################
-histoplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
+histoplot <- function(data, col, unit, binw=1, checkNA=TRUE, qstext=qs) {
   setDT(data)
   meacol <- data[,mean(get(col), na.rm=T)]
   medcol <- data[,median(get(col), na.rm=T)]
@@ -91,12 +94,10 @@ histoplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
     scale_y_continuous(expand=c(0,0)) + 
     geom_vline(xintercept=meacol) + 
     annotate("text", x=meacol-binw/5, y=Inf, hjust=1.2, angle=90,
-             label = paste('Mean:',round(meacol), unit)) +
+             label = paste('Mean:',round(meacol,1), unit)) +
     geom_vline(xintercept=medcol) + 
     annotate("text", x=medcol-binw/5, y=Inf, hjust=1.2,  angle=90,
-             label = paste('Median:',round(medcol), unit)) +
-    ggtitle(paste(title, 'Number of respondents:', 
-                  data[!is.na(get(col)) & get(col)!=-99, .N], '/', data[, .N])) + 
+             label = paste('Median:',round(medcol,1), unit)) +
     theme_classic()
   if (checkNA) {
     maxcol <- max(data[,get(col)], na.rm=T)
@@ -106,17 +107,25 @@ histoplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
                                 expand=c(0,0), name=paste0('Number of ',unit)) +
       theme(axis.text.x = element_text(angle=90))
   }
+  
+  try({
+    title <- tstrsplit(qstext[rownames(qstext) == col, 1], '?', fixed=T)[[1]]
+    p <- p + ggtitle(paste(title, '? Number of respondents:',
+                           data[!is.na(get(col)) & get(col)!=-99, .N], '/', data[, .N]))
+  }, silent = T)
+  
   return(p)
 }
 
-singleAplot <- function(data, col, title, unit, binw=1, checkNA=TRUE) {
+singleAplot <- function(data, col, unit, binw=1, checkNA=TRUE, qstext=qs) {
   data <- setDT(data)
-  p <- ggplot(data[get(col)!=-99,], aes_string(col)) + 
+  title <- tstrsplit(qstext[rownames(qstext) == col, 1], '?', fixed=T)[[1]]
+  p <- ggplot(data[!(get(col) %in% c('-99',-99,'')),], aes_string(col)) + 
     geom_histogram(stat="count") + 
     scale_x_discrete(expand=c(0,0), name='') + 
     scale_y_continuous(expand=c(0,0)) + 
-    ggtitle(paste(title, 'Number of respondents: ', 
-                  data[!is.na(get(col)) & get(col)!=-99, .N], '/', heedteach[, .N])) + 
+    ggtitle(paste(title, '? Number of respondents: ', 
+                  data[!is.na(get(col)) & !(get(col)%in% c(-99,'-99','')), .N], '/', heedteach[, .N])) + 
     theme_classic()
   return(p)
 }
@@ -131,26 +140,33 @@ multiformat <- function(data, pattern) {
   return(qmelt[,value := factor(value, levels = unique(qmelt$value[order(qmelt$levels)]))])
 }
 
-multiAhisto <- function(data, pattern, title, xaxis) {
+multiAhisto <- function(data, pattern, xaxis, qstext=qs) {
   qmelt <- multiformat(data, pattern)
-  p <- ggplot(qmelt[!is.na(value) & !(value %in% c('Other (please specify)')) & value!='',], aes(x=value)) + 
+  title <- tstrsplit(qstext[rownames(qstext) == qmelt$variable[1], 1], '?', fixed=T)[[1]]
+  p <- ggplot(qmelt[!is.na(value) & !(value %in% c('Other (please specify)','','-99')),], aes(x=value)) + 
     geom_histogram(stat="count") + 
     scale_x_discrete(expand=c(0,0), name=xaxis) + 
     scale_y_continuous(expand=c(0,0)) + 
-    ggtitle(paste(title, 'Number of respondents: ', 
-                  length(qmelt[!is.na(value) & value!='', unique(ResponseId)]), '/', data[, .N])) + 
+    ggtitle(paste(title, '? Number of respondents: ', 
+                  length(qmelt[!is.na(value) & !(value %in% c('','-99')), unique(ResponseId)]), '/', data[, .N])) + 
     theme_classic() +
     theme(axis.text.x = element_text(angle=10, vjust=0.5))
   return(p)
 }
 
-likertformat <- function(datatext, datanum, pattern, qstext=qs) {
+
+likertformat <- function(datatext, datanum, pattern, diverging=FALSE, qstext=qs) {
   datnumformat <- multiformat(datanum, pattern)
-  datnumformat$value <- as.numeric(as.character(datnumformat$value))-1
+  if (diverging) {
+    midlikert <- median(unique(as.numeric(as.character(datnumformat$value))), na.rm=T)
+    datnumformat$value <- as.numeric(as.character(datnumformat$value))-midlikert
+  } else{
+    datnumformat$value <- as.numeric(as.character(datnumformat$value))-1
+  }
   dattextformat <- multiformat(datatext, pattern)
   datjoin <- datnumformat[dattextformat, on=c('ResponseId', 'variable')]
   rowind <- grep(pattern, rownames(qstext))
-  qslikert <- data.frame(choices = tstrsplit(qstext[rowind, '1'], '-', fixed=T)[[2]])
+  qslikert <- data.frame(choices = tstrsplit(qstext[rowind, '1'], '?', fixed=T)[[2]])
   qslikert$levels <- as.numeric(rownames(qslikert))
   datjoinq <- datjoin[qslikert, on='levels']
   datjoinq[!is.na(value), `:=`(varmean=mean(value), N=.N), by = variable]
@@ -159,7 +175,7 @@ likertformat <- function(datatext, datanum, pattern, qstext=qs) {
 }
 
 likertboxplot <- function(dataformat, pattern, qstext=qs) {
-  title <- tstrsplit(qstext[rownames(qstext) == dataformat$variable[1], 1], '_', fixed=T)[[1]]
+  title <- tstrsplit(qstext[rownames(qstext) == dataformat$variable[1], 1], '?', fixed=T)[[1]]
   p <- ggplot(dataformat, aes(x=variable, y=value)) + 
     geom_boxplot(draw_quantiles = c(0.25, 0.5, 0.75)) + 
     geom_point(aes(y=varmean), color='red', size=3, shape=18) + 
@@ -169,12 +185,12 @@ likertboxplot <- function(dataformat, pattern, qstext=qs) {
                        labels=paste0(unique(dataformat$i.value), ' (', unique(dataformat$value),')')) +
     theme_classic() + 
     theme(axis.title.x = element_blank()) +
-    ggtitle(title)
+    ggtitle(paste0(title,'?'))
   print(p)
 }
 
-likertstackedbar <- function(dataformat, qstext=qs) {
-  title <- tstrsplit(qstext[rownames(qstext) == dataformat$variable[1], 1], '_', fixed=T)[[1]]
+likertstackedbar <- function(dataformat, diverging=FALSE, qstext=qs) {
+  title <- tstrsplit(qstext[rownames(qstext) == dataformat$variable[1], 1], '?', fixed=T)[[1]]
   
   dataformat_summary <- dataformat[!is.na(value),{
     tot = .N
@@ -183,14 +199,44 @@ likertstackedbar <- function(dataformat, qstext=qs) {
   dataformat_summaryattri <- dataformat_summary[unique(dataformat[,.(variable, value, i.value, choices, varmean, N)]),
                                                 on= c('variable','value'), nomatch=0]
   
-  p <- ggplot(dataformat_summaryattri[order(c(value,frac))], (aes(x=variable, y=frac, fill=value))) +
-    geom_bar(stat="identity") + 
-    scale_x_discrete(labels = str_wrap(paste0(levels(dataformat$choices),' (',
-                                              unique(dataformat_summaryattri[order(-varmean), .(variable,N)])$N,')'), width=10)) +
-    scale_y_continuous(name= 'Response', expand=c(0,0)) +
-    theme_classic() + 
-    theme(axis.title.x = element_blank()) +
-    ggtitle(title)
+  if (diverging) {
+    dataformat_summaryattri[, frac2 := ifelse(value <0, -frac, frac)]
+    up <- dataformat_summaryattri[frac2 >= 0,]
+    down <- dataformat_summaryattri[frac2 < 0,]
+    
+    commapos <- function(x, ...) {
+      format(abs(x), big.mark = ",", trim = TRUE,
+             scientific = FALSE, ...)
+    }
+    
+    p <- ggplot(dataformat_summaryattri[order(dataformat_summaryattri$value, dataformat_summaryattri$variable),]) + 
+      geom_bar(data = up,aes(x = variable,y = frac2,fill = factor(value)),
+               stat = "identity", position = position_stack(reverse = TRUE)) + 
+      geom_bar(data = down,aes(x = variable,y = frac2,fill = factor(value)),
+               stat = "identity", position = position_stack(reverse = TRUE)) + 
+      scale_x_discrete(name = 'Choice', labels = str_wrap(paste0(levels(dataformat$choices),' (',
+                                                                 unique(dataformat_summaryattri[order(-varmean), .(variable,N)])$N,')'), width=10)) +
+      scale_y_continuous(name= 'Response', expand=c(0,0), limits=c(-1,1), breaks=seq(-1,1,0.25),labels=commapos) +
+      theme_classic() + 
+      theme(axis.title.x = element_blank()) +
+      ggtitle(paste0(title,'?')) +
+      coord_flip() +
+      scale_fill_brewer(palette = "RdYlBu", 
+                        labels= unique(dataformat_summaryattri[order(value),]$i.value)) +
+      theme(legend.title = element_blank())
+    
+  } else {
+    p <- ggplot(dataformat_summaryattri[order(dataformat_summaryattri$value, dataformat_summaryattri$variable),], 
+                (aes(x=variable, y=frac, fill=value, group=value))) +
+      geom_bar(stat="identity") + 
+      scale_x_discrete(labels = str_wrap(paste0(levels(dataformat$choices),' (',
+                                                unique(dataformat_summaryattri[order(-varmean), .(variable,N)])$N,')'), width=10)) +
+      scale_y_continuous(name= 'Response', expand=c(0,0)) +
+      theme_classic() + 
+      theme(axis.title.x = element_blank()) +
+      ggtitle(paste0(title,'?')) +
+      theme(legend.title = element_blank())
+  }
   print(p)
 }
 
@@ -221,7 +267,7 @@ heedteach[is.na(Q2.6_1), Q2.6_1 := 2019]
 heedteach[,ResponseId := factor(ResponseId, levels = unique(heedteach$ResponseId[order(heedteach$Q2.6_1, heedteach$Q2.5_1)]))]
 
 heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, dataduration := Q2.6_1-Q2.5_1]
-durahist <- histoplot(heedteach, col='dataduration', title = '', unit='Years')
+durahist <- histoplot(heedteach, col='dataduration', unit='Years')
 
 ggplot(heedteach[Q2.5_1 != -99 & Q2.6_1 != -99,]) + 
   geom_segment(aes(x=Q2.5_1, xend=Q2.6_1, y=ResponseId, yend=ResponseId), size=1.2) +
@@ -304,7 +350,7 @@ ggplot(heedteach, aes(Q8.4_1)) +
   geom_histogram() + 
   scale_x_continuous(breaks=valrange, labels=c(valrange[-length(valrange)],paste0('>',valrange[length(valrange)-1])),
                      expand=c(0,0), 
-                     name='Number of classes taught') + 
+                     name='Number of instructors') + 
   scale_y_continuous(expand=c(0,0)) + 
   ggtitle(paste('Teaching Q8.4: How many instructors are/were involved? Number of respondents: ', 
                 heedteach[!is.na(Q8.4_1) & Q8.4_1 != -99, .N], '/', heedteach[, .N])) + 
@@ -317,9 +363,7 @@ check <- heedteach[Q9.2_1 %in% c(0,-99, NA),]
 heedteach[is.na(Q9.2_1), Q9.2_1 := 101]
 heedteach[Q9.2_1 %in% c(0,101), flag:=flag+1]
 
-print(histoplot(data=heedteach, col='Q9.2_1', 
-          title='Teaching Q9.2 - What is the number of students participating in the field excursions?',
-          unit='Students', binw=5))
+print(histoplot(data=heedteach, col='Q9.2_1',unit='Students', binw=5))
 
 ################ Q9.3 - In how many field excursions are/were ecological data collected during the class? ################
 #qplot(heedteach$Q9.3_1)
@@ -328,9 +372,7 @@ check <- heedteach[Q9.3_1 %in% c(0,-99, NA),]
 heedteach[is.na(Q9.3_1), Q9.3_1 := max(heedteach$Q9.3_1, na.rm=T)+1]
 heedteach[Q9.3_1 %in% c(0,max(heedteach$Q9.3_1, na.rm=T)), flag:=flag+1]
 
-print(histoplot(data=heedteach, col='Q9.3_1', 
-                title='Teaching Q9.3 -  In how many field excursions are/were ecological data collected during the class?',
-                unit='Excursions', binw=1))
+print(histoplot(data=heedteach, col='Q9.3_1',unit='Excursions', binw=1))
 
 ################ Q9.4 - How many total days of ecological data collection are/were involved across all field excursions in a typical year? ################
 #qplot(heedteach$Q9.4_1)
@@ -340,9 +382,7 @@ heedteach[is.na(Q9.4_1), Q9.4_1 := 31]
 heedteach[Q9.4_1==-99, Q9.4_1 := NA]
 heedteach[Q9.4_1 %in% c(NA, 0,max(heedteach$Q9.4_1, na.rm=T)), flag:=flag+1]
 
-print(histoplot(data=heedteach, col='Q9.4_1', 
-                title='Teaching Q9.4 -  How many total days of ecological data collection are/were involved across all field excursions?',
-                unit='Days', binw=2))
+print(histoplot(data=heedteach, col='Q9.4_1',unit='Days', binw=2))
 
 ################ Q9.5 - Across all field excursions, in how many locations does/did the class collect ecological data? ##############
 #qplot(heedteach$Q9.5_1)
@@ -352,9 +392,7 @@ heedteach[is.na(Q9.5_1), Q9.5_1 := 51]
 heedteach[Q9.5_1==-99, Q9.5_1 := NA]
 heedteach[Q9.5_1 %in% c(NA, 0,max(heedteach$Q9.5_1, na.rm=T)), flag:=flag+1]
 
-print(histoplot(data=heedteach, col='Q9.5_1', 
-                title='Teaching Q9.5 -  Across all field excursions, in how many locations does/did the class collect ecological data?',
-                unit='Locations', binw=2))
+print(histoplot(data=heedteach, col='Q9.5_1', unit='Locations', binw=2))
 
 ################ Q10.2 - What is/was the total cost of running the field excursion(s) for the class ($US) in a typical year? ##############
 #A bug in the survey: some weird condition made it in there? - we got no data
@@ -437,8 +475,7 @@ ggplot(q10_5_melt[!is.na(value) & !(value %in% c('Other (please specify)')) & va
 heedteach[grep('(u[.]*s[.]*a*$)|(united.*states)', heedteach$X1_Q11.2, ignore.case = TRUE),
           X1_Q11.2 := 'USA']
 
-singleAplot(heedteach, 'X1_Q11.2', 'Country where the ecological data are/were collected') +
-  theme(axis.text.x = element_text(angle=40, vjust=0.5))
+singleAplot(heedteach, 'X1_Q11.2') + theme(axis.text.x = element_text(angle=40, vjust=0.5))
 
 ################ Q11.3 - Please drag the pin to the field location as precisely as possible in the map below ##############
 heedteach[, c('lat', 'long') := tstrsplit(X1_Q11.3, ',', fixed=T),]
@@ -461,23 +498,20 @@ ggplot(heedteach, aes(x=X1_Q11.4_1, fill=X1_Q11.4_2)) +
   theme(axis.text.x = element_text(angle=15, vjust=0.6))
 
 ################ Q12.2 - What type(s) of variables are/were collected during the field excursion(s)?  ##############
-multiAhisto(heedteach, pattern= 'Q12.2', title='Q12.2 - What type(s) of variables are/were collected during the field excursion(s)?',
-            xaxis = 'Data type')
-
-multiAhisto(heedteach, pattern= 'Q12.3', title='Q12.3 - What type(s) of variables are/were collected during the field excursion(s)?',
-            xaxis = 'Data type') + theme(axis.text.x = element_text(angle=15))
-multiAhisto(heedteach, pattern= 'Q12.4', title='Q12.3 - What type(s) of variables are/were collected during the field excursion(s)?',
-            xaxis = 'Data type') + theme(axis.text.x = element_text(angle=30))
-multiAhisto(heedteach, pattern= 'Q12.5', title='Q12.3 - What type(s) of variables are/were collected during the field excursion(s)?',
-            xaxis = 'Data type')  + theme(axis.text.x = element_text(angle=30))
+multiAhisto(heedteach, pattern= 'Q12.2', xaxis = 'Data type')
+multiAhisto(heedteach, pattern= 'Q12.3', xaxis = 'Data type') + 
+  theme(axis.text.x = element_text(angle=15))
+multiAhisto(heedteach, pattern= 'Q12.4', xaxis = 'Data type') + 
+  theme(axis.text.x = element_text(angle=30))
+multiAhisto(heedteach, pattern= 'Q12.5', xaxis = 'Data type')  + 
+  theme(axis.text.x = element_text(angle=30))
 #axis.ticks.length = unit(1, "cm")
 
 ################ Q13.2 - Did you collect the data with the intention to study a specific threat to the factors of interest/environment?  ##############
-singleAplot(heedteach, col='Q13.2', title='Did you collect the data with the intention to study a specific threat', unit='bla')
+singleAplot(heedteach, col='Q13.2')
 
 ################ Q13.3 - What threat(s) is/was the data collection intended to study?  ##############
-multiAhisto(heedteach, pattern= 'Q13.3', title='Q13.3 -  What threat(s) is/was the data collection intended to study',
-            xaxis = 'Threat')  + theme(axis.text.x = element_text(angle=0)) +
+multiAhisto(heedteach, pattern= 'Q13.3',xaxis = 'Threat')  + theme(axis.text.x = element_text(angle=0)) +
   scale_x_discrete(labels = function(x) str_wrap(x, width = 10))
 
 ################ Q15.2 - What benefits do you think your students gain/gained from collecting and working with the class' ecological dataset? ########
@@ -485,15 +519,91 @@ q15_2format <- likertformat(heedteach, heednumteach, 'Q15[.]2.*[^TEXT]$')
 likertboxplot(q15_2format)
 likertstackedbar(q15_2format)
 
+################ Q15.3 - Have you ever used the data collected in this class outside of class-based projects (e.g. publications, blog posts, grant proposals)? ########
+singleAplot(heedteach, 'Q15.3')
+
+################ Q15.4 - How many peer-reviewed publications have resulted from the data collected in this class?  ########
+print(histoplot(data=heedteach, col='Q15.4_1', unit='Publications', binw=1))
+
+################ Q15.5 - How many peer-reviewed publications were the students involved in?  ########
+check <- heedteach[Q15.5_1 %in% c(0,-99, NA),]
+heedteach[Q15.4_1>0 & is.na(Q15.5_1), Q15.5_1 := 11]
+heedteach[Q15.5_1 %in% c(-99,11), flag:=flag+1]
+heedteach[Q15.5_1==-99, Q15.5_1 := NA]
+
+print(histoplot(data=heedteach, col='Q15.5_1', unit='Publications', binw=1))
+
+################ Q15.6 - Have these data resulted in subsequent grants or projects?  ########
+singleAplot(heedteach, 'Q15.6')
+
+################ Q15.7 - Have these data been used by local or national government agencies?  ########
+multiAhisto(heedteach, pattern= 'Q15[.]7.*[^TEXT]$', xaxis = 'Uses') 
+
+################ Q15.8 - What other personal benefits have you gained from teaching a class involving ecological data collection?  ########
+q15_8format <- likertformat(heedteach, heednumteach, 'Q15[.]8.*[^TEXT]$')
+likertboxplot(q15_8format)
+likertstackedbar(q15_8format)
+
+################ Q15.9 - What other significant outcomes have you seen as a result of your class-based ecological data collection?  ########
+kable(heedteach[!(Q15.9 %in% c('','-99')),'Q15.9', with=FALSE], 
+      caption = paste0(tstrsplit(qs[rownames(qs) == 'Q15.9', 1], '?', fixed=T)[[1]],'?')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T) 
+
+################ Q15.10 - For what main reasons have the data not been used outside of class-based projects? ########
+multiAhisto(heedteach, pattern= 'Q15[.]10.*[^TEXT]$', xaxis = '') 
+
+################ Q16.2 - In your experience, what are the main challenges to implementing and maintaining class-based data collection? ########
+q16_2format <- likertformat(heedteach, heednumteach, 'Q16[.]2.*[^TEXT]$',diverging = TRUE)
+likertstackedbar(q16_2format, diverging=TRUE)
+
+################ Q16.3 - Do you have additional comments or advice from your experience implementing and maintaining class-based data collection? ########
+kable(heedteach[!(Q16.3 %in% c('','-99')),'Q16.3', with=FALSE], 
+      caption = paste0(tstrsplit(qs[rownames(qs) == 'Q16.3', 1], '?', fixed=T)[[1]],'?')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T)
+
+################ Q16.4 - In your experience, what are the main challenges to analyzing data collected as part of field excursions?########
+multiAhisto(heedteach, pattern= 'Q16[.]4.*[^TEXT]$', xaxis = '') 
+
+################ Q16.5 - For what percentage of the study period do gaps in data collection exist?  ###########
+singleAplot(heedteach, col='Q16.5')
+
+################ Q16.6 - What are the main reasons for these gaps in data collection?  ###########
+multiAhisto(heedteach, pattern= 'Q16[.]6.*[^TEXT]$', xaxis = '') 
+
+################ Q16.7 - For which of the following applications do you feel comfortable using your class-based dataset? ########
+#BUG in the survey, did not display!!?
+
+################ Q16.8 - What factors, if any, limit your confidence in using the data for other purposes than the class requirements? #######
+multiAhisto(heedteach, pattern= 'Q16[.]8.*[^TEXT]$', xaxis = '') 
+
+################ Q16.9 - Do you have additional comments or advice from your experience analyzing and disseminating data from a class-based ecological dataset? ##############
+kable(heedteach[!(Q16.9 %in% c('','-99')),'Q16.9', with=FALSE], 
+      caption = paste0(tstrsplit(qs[rownames(qs) == 'Q16.9', 1], '?', fixed=T)[[1]],'?')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T)
+
+################ Q16.9 - Do you have additional comments or advice from your experience analyzing and disseminating data from a class-based ecological dataset? ##############
 
 
+
+multiAhisto(heedteach, pattern= 'Q18[.]2.*[^TEXT]$', xaxis = '') 
+singleAplot(heedteach, 'Q18.3')
+multiAhisto(heedteach, 'Q18.4', xaxis='Choice')
+multiAhisto(heedteach, 'Q18.5', xaxis='Choice')
+multiAhisto(heedteach, 'Q18.6', xaxis='Choice')
+multiAhisto(heedteach, 'Q18.7', xaxis='Choice')
+q18_8format <- likertformat(heedteach, heednumteach, 'Q18[.]8.*[^TEXT]$',diverging = TRUE)
+likertstackedbar(q18_8format, diverging=TRUE) 
+
+kable(heedteach[!(Q19.1 %in% c('','-99')),'Q19.1', with=FALSE], 
+      caption = paste0(tstrsplit(qs[rownames(qs) == 'Q19.1', 1], '?', fixed=T)[[1]],'?')) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T)
 
 
 #q15.5 NOT DISPLAYED TO THOSE WHO PRESSED > 10 PUBLICATIONS
 
 
-singleAplot(heedteach, 'Q18.3', 'Do you currently share the data collected as part of this class?', unit='CUREs')
+
 table(heedteach$Q18.3)
-multiAhisto(heedteach, 'Q18.4', 'At what level(s) do you currently share your data?', xaxis='Choice')
+
 
 #Check ratio of instructor to students
