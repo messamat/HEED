@@ -581,10 +581,7 @@ kable(heedteach[!(Q16.9 %in% c('','-99')),'Q16.9', with=FALSE],
       caption = paste0(tstrsplit(qs[rownames(qs) == 'Q16.9', 1], '?', fixed=T)[[1]],'?')) %>%
   kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T)
 
-################ Q16.9 - Do you have additional comments or advice from your experience analyzing and disseminating data from a class-based ecological dataset? ##############
-
-
-
+##############################################################
 multiAhisto(heedteach, pattern= 'Q18[.]2.*[^TEXT]$', xaxis = '') 
 singleAplot(heedteach, 'Q18.3')
 multiAhisto(heedteach, 'Q18.4', xaxis='Choice')
@@ -598,12 +595,4 @@ kable(heedteach[!(Q19.1 %in% c('','-99')),'Q19.1', with=FALSE],
       caption = paste0(tstrsplit(qs[rownames(qs) == 'Q19.1', 1], '?', fixed=T)[[1]],'?')) %>%
   kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T)
 
-
 #q15.5 NOT DISPLAYED TO THOSE WHO PRESSED > 10 PUBLICATIONS
-
-
-
-table(heedteach$Q18.3)
-
-
-#Check ratio of instructor to students
