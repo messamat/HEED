@@ -1,11 +1,16 @@
 #+ fig.width=10, fig.height=6, dpi=300, out.width="1920px",out.height="1080px"
 library(ggplot2)
+library(gridExtra)
+library(gtable)
+library(RColorBrewer)
 library(data.table)
+library(arsenal)
 library(stringr)
 library(sp)
 library(leaflet)
 library(knitr)
 library(kableExtra)
+library(ggrepel)
 
 #Import data
 setwd('C:/Mathis/SAFS/HEED') ##UPDATE##
@@ -26,13 +31,22 @@ nrow(heedsel[heedsel$Q2.1=='Yes',])
 write.csv(heedsel, 'results/heedsel.csv', row.names = F)
 
 #Went through every response manually to check whether toggle bars with -99 were untouched or checked the 'NA' button
-#Left cases where didn't touch the toggle bar to -99, otherwise, changed to NA
-heededit <- read.csv('data/heedsel_edit_20181018.csv')
+#Left cases where didn't touch the toggle bar to -99, otherwise, changed to NA (-> heedsel_edit_20180118.csv)
+#Then, JD went through to clean "Other" responses for the questions that we plan to report in the manuscript 
+heededit <- read.csv('data/heedsel_edit_20181219.csv')
+
+#TO DO: integrate changes to table in the code for those that weren't already included
+#library(arsenal)
+#heededit2 <- read.csv('data/heedsel_edit_20181018.csv')
+#cmp <- compare(heededit, heededit2)
+#diffs(cmp, by.var = TRUE)
+#diffs(cmp, vars = c("ps", "ast"))
+
 
 #Check number of respondents and countries
-length(unique(heededit$ResponseId))
-length(heededit[heededit$Q20.2_1 != '-99', 'Q20.2_1'])
-length(unique(heededit[heededit$Q20.2_1 != '-99', 'Q20.2_1']))
+length(unique(heededit$ResponseId)) #of respondents
+length(heededit[heededit$Q20.2_1 != '-99', 'Q20.2_1']) # of respondents that entered their country
+length(unique(heededit[heededit$Q20.2_1 != '-99', 'Q20.2_1'])) #number of unique countries
 
 #Check out date/time of survey completion
 str(heededit)
@@ -76,14 +90,22 @@ write.csv(heednoteach, 'results/heededit_noteach.csv', row.names = F)
 heednumteach <- setDT(heednum)[ResponseId %in% heedteach$ResponseId,
                                colnames(heednum) %in% colnames(heedteach), with=FALSE] 
 heednumnoteach <- setDT(heednum)[ResponseId %in% heednoteach$ResponseId,
-                               colnames(heednum) %in% colnames(heednoteach), with=FALSE] 
+                                 colnames(heednum) %in% colnames(heednoteach), with=FALSE] 
 
 #_________________________________________________________________________
-# QA/QC DATA FOR THOSE SURVEY RESPONDENTS THAT EACH A FIELD-BASED CLASS #
-#_________________________________________________________________________
+# QA/QC AND PLOT DATA 
+# For those survey respondents that teach a field-based class 
+#________________________________________________________________________####
 heedteach$flag <- 0
 
 ################################## Plot functions ###############################################
+commapos <- function(x, ...) {
+  format(abs(x), big.mark = ",", trim = TRUE,
+         scientific = FALSE, ...)
+}
+
+lastel <- function(x) x[[length(x)]]
+
 histoplot <- function(data, col, unit, binw=1, checkNA=TRUE, qstext=qs) {
   setDT(data)
   meacol <- data[,mean(get(col), na.rm=T)]
@@ -154,7 +176,6 @@ multiAhisto <- function(data, pattern, xaxis, qstext=qs) {
   return(p)
 }
 
-
 likertformat <- function(datatext, datanum, pattern, diverging=FALSE, qstext=qs) {
   datnumformat <- multiformat(datanum, pattern)
   if (diverging) {
@@ -204,11 +225,6 @@ likertstackedbar <- function(dataformat, diverging=FALSE, qstext=qs) {
     up <- dataformat_summaryattri[frac2 >= 0,]
     down <- dataformat_summaryattri[frac2 < 0,]
     
-    commapos <- function(x, ...) {
-      format(abs(x), big.mark = ",", trim = TRUE,
-             scientific = FALSE, ...)
-    }
-    
     p <- ggplot(dataformat_summaryattri[order(dataformat_summaryattri$value, dataformat_summaryattri$variable),]) + 
       geom_bar(data = up,aes(x = variable,y = frac2,fill = factor(value)),
                stat = "identity", position = position_stack(reverse = TRUE)) + 
@@ -240,6 +256,20 @@ likertstackedbar <- function(dataformat, diverging=FALSE, qstext=qs) {
   print(p)
 }
 
+resize_heights <- function(g, heights = rep(1, length(idpanels))){
+  idpanels <- unique(g$layout[grepl("panel",g$layout$name), "t"])
+  g$heights <- grid:::unit.list(g$heights)
+  g$heights[idpanels] <- unit.c(do.call(unit, list(heights, 'null')))
+  g
+}
+
+resize_widths <- function(g, widths = rep(1, length(idpanels))){
+  idpanels <- unique(g$layout[grepl("panel",g$layout$name), "l"])
+  g$widths <- grid:::unit.list(g$widths)
+  g$widths[idpanels] <- unit.c(do.call(unit, list(widths, 'null')))
+  g
+}
+
 ################ Q2.2 - How many classes do you teach? ################
 heedteach[is.na(Q2.2_1), Q2.2_1 := 6] 
 ggplot(heedteach, aes(Q2.2_1)) + 
@@ -265,12 +295,16 @@ ggplot(heedteach, aes(Q2.4)) +
 ################ Q2.5_1 and Q2.6_1 - In what year did data collection start in the context of this class?  When was the last year of data collection, if applicable? ################
 heedteach[is.na(Q2.6_1), Q2.6_1 := 2019]
 heedteach[,ResponseId := factor(ResponseId, levels = unique(heedteach$ResponseId[order(heedteach$Q2.6_1, heedteach$Q2.5_1)]))]
-
 heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, dataduration := Q2.6_1-Q2.5_1]
+heedteach[dataduration==0, dataduration := 1] #For those that only lasted one year, change to 1 (e.g start and end in 2015)
+
+#Histogram of duration
 durahist <- histoplot(heedteach, col='dataduration', unit='Years')
 
+#Consider adding color (color = X1_Q11.4_1)
 ggplot(heedteach[Q2.5_1 != -99 & Q2.6_1 != -99,]) + 
   geom_segment(aes(x=Q2.5_1, xend=Q2.6_1, y=ResponseId, yend=ResponseId), size=1.2) +
+  scale_color_distiller(palette='Spectral') + 
   scale_x_continuous(expand=c(0,0), name='Start and end years of data collection') + 
   scale_y_discrete(expand=c(0,0), name='') + 
   ggtitle(paste('Teaching Q2.5 and 2.6: In what year did data collection start and end. Number of respondents:', 
@@ -392,8 +426,9 @@ heedteach[is.na(Q9.5_1), Q9.5_1 := 51]
 heedteach[Q9.5_1==-99, Q9.5_1 := NA]
 heedteach[Q9.5_1 %in% c(NA, 0,max(heedteach$Q9.5_1, na.rm=T)), flag:=flag+1]
 
-print(histoplot(data=heedteach, col='Q9.5_1', unit='Locations', binw=2))
+heedteach[Q9.5_1 < 4, .N]/heedteach[!(Q9.5_1 %in% c(NA, 0)), .N]
 
+print(histoplot(data=heedteach, col='Q9.5_1', unit='Locations', binw=2))
 ################ Q10.2 - What is/was the total cost of running the field excursion(s) for the class ($US) in a typical year? ##############
 #A bug in the survey: some weird condition made it in there? - we got no data
 
@@ -414,7 +449,7 @@ heedteach[(Q10.3_6_TEXT) %in% course_reclass,`:=`(Q10.3_6 = '-99', Q10.3_6_TEXT 
 heedteach[(Q10.3_7_TEXT) %in% course_reclass,`:=`(Q10.3_7 = '-99', Q10.3_7_TEXT = '-99',
                                                   Q10.3_1 = 'University/academic department')]
 heedteach[(Q10.3_6_TEXT) == 'Third party funding',`:=`(Q10.3_6 = '-99', Q10.3_6_TEXT = '-99', 
-                                                  Q10.3_2 = 'Outside organization(s)')]
+                                                       Q10.3_2 = 'Outside organization(s)')]
 
 q10_3_melt <- multiformat(heedteach, pattern='Q10.3')
 ggplot(q10_3_melt[!is.na(value) & !(value %in% c('Other #1 (please specify)','Other #2 (please specify)')),], aes(x=value)) + 
@@ -488,7 +523,7 @@ flocs <- SpatialPoints(data.frame(heedteach[!is.na(long),long],heedteach[!is.na(
 leaflet(data = flocs) %>% addTiles() %>%
   addMarkers(clusterOptions = markerClusterOptions())
 
-################ Q11.4 - Please drag the pin to the field location as precisely as possible in the map below ##############
+################ Q11.4 - In what ecosystem/biome/habitat? ##############
 table(heedteach$X1_Q11.4_1)
 heedteach[,X1_Q11.4_2:=substr(X1_Q11.4_2, 1,25)]
 ggplot(heedteach, aes(x=X1_Q11.4_1, fill=X1_Q11.4_2)) + 
@@ -581,18 +616,420 @@ kable(heedteach[!(Q16.9 %in% c('','-99')),'Q16.9', with=FALSE],
       caption = paste0(tstrsplit(qs[rownames(qs) == 'Q16.9', 1], '?', fixed=T)[[1]],'?')) %>%
   kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T)
 
-##############################################################
+################ Q18.2 - How are/were data stored for purposes other than the class? ####
 multiAhisto(heedteach, pattern= 'Q18[.]2.*[^TEXT]$', xaxis = '') 
+
+################ Q18.3 - Do you currently share the data collected as part of this class? ####
 singleAplot(heedteach, 'Q18.3')
+
+################ Q18.4 - At what level(s) do you currently share your data? ####
 multiAhisto(heedteach, 'Q18.4', xaxis='Choice')
+
+################ Q18.5 - What level(s) of data sharing would you be interested in, if any? ####
 multiAhisto(heedteach, 'Q18.5', xaxis='Choice')
+
+################ Q18.6 - Under what condition(s) do you share your data? ####
 multiAhisto(heedteach, 'Q18.6', xaxis='Choice')
+
+################ Q18.7 - Under what condition(s) would you be interested in sharing your data, if any? ####
 multiAhisto(heedteach, 'Q18.7', xaxis='Choice')
+
+################ Q18.8 - Would you be interested in an online community repository specifically designed to host class-based ecological datasets? ####
 q18_8format <- likertformat(heedteach, heednumteach, 'Q18[.]8.*[^TEXT]$',diverging = TRUE)
 likertstackedbar(q18_8format, diverging=TRUE) 
 
+################ Q19.1 - Do you have additional comments on courses involving ecological data collection you would like to share? ####
 kable(heedteach[!(Q19.1 %in% c('','-99')),'Q19.1', with=FALSE], 
       caption = paste0(tstrsplit(qs[rownames(qs) == 'Q19.1', 1], '?', fixed=T)[[1]],'?')) %>%
   kable_styling(bootstrap_options = c("striped", "hover","responsive"), full_width=T)
 
-#q15.5 NOT DISPLAYED TO THOSE WHO PRESSED > 10 PUBLICATIONS
+#Note: #q15.5 NOT DISPLAYED TO THOSE WHO PRESSED > 10 PUBLICATIONS
+
+
+#####_________________________________________________________________________####
+#    PUBLICATION PLOTS AND STATISTICS
+#####_________________________________________________________________________####
+################ Q2.5_1 and Q2.6_1 - In what year did data collection start in the context of this class?  When was the last year of data collection, if applicable? ################
+heedteach[is.na(Q2.6_1), Q2.6_1 := 2019]
+heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, dataduration := Q2.6_1-Q2.5_1]
+
+#---- Histogram of duration ----
+setDT(heedteach)
+binw=1
+meacol <- heedteach[,mean(dataduration, na.rm=T)]
+medcol <- heedteach[,median(dataduration, na.rm=T)]
+maxcol <- max(heedteach[,dataduration], na.rm=T)
+valrange <- seq(min(heedteach[,dataduration], na.rm=T),maxcol, by=5)
+
+durahist <- ggplot(heedteach, aes(x=dataduration)) + 
+  geom_histogram(binwidth=binw, alpha=1/3) +
+  scale_x_continuous(breaks=c(valrange, maxcol), 
+                     labels=c(valrange, maxcol),
+                     expand=c(0,0), name='Number of years') +
+  scale_y_continuous(expand=c(0,0), name='Count') + 
+  # geom_vline(xintercept=meacol) + 
+  # annotate("text", x=meacol-binw/5, y=Inf, hjust=1.2, angle=90,
+  #          label = paste('Mean:',round(meacol,1), 'years')) +
+  geom_vline(xintercept=medcol) + 
+  annotate("text", x=medcol-1.5, y=Inf, hjust=1.2,  angle=90,
+           label = paste('Median:',round(medcol,1), 'years')) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=90))
+
+#---- Cumulative number ----
+cumdat <- merge(heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, .N, by=Q2.5_1][order(Q2.5_1),list(year=Q2.5_1,cumstart=cumsum(N))],
+                heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, .N, by=Q2.6_1][order(Q2.6_1),list(year=Q2.6_1,cumend=cumsum(N))],
+                on='year', all.x=T) %>%
+  .[is.na(cumend), cumend := 0,] %>%
+  .[, cumactive := cumstart-cumend]
+
+ggplot(cumdat, aes(x=year)) + 
+  geom_ribbon(aes(ymin=cumend, ymax=cumstart), fill='red') +
+  geom_ribbon(aes(ymin=0, ymax=cumend), fill='blue')
+
+#---- Top plot ----
+heedteach[,ResponseId := factor(ResponseId, levels = unique(heedteach$ResponseId[order(heedteach$Q2.6_1, heedteach$Q2.5_1)]))]
+
+top <- ggplot(data=cumdat, aes(x=year)) + 
+  geom_line(aes(y=cumstart), color='red', size=1.5, alpha=1/3) +
+  geom_line(aes(y=cumend), color='blue', size=1.5, alpha=1/3) + 
+  scale_x_continuous(expand=c(0,0)) + 
+  scale_y_continuous(expand=c(0,0)) +
+  theme_classic() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+#---- Main plot (consider adding color based on biome? aes(color = X1_Q11.4_1)) ----
+main <- ggplot(data=heedteach[Q2.5_1 != -99 & Q2.6_1 != -99,]) +
+  geom_segment(aes(x=Q2.5_1, xend=Q2.6_1, y=as.numeric(ResponseId), yend=as.numeric(ResponseId), color=dataduration), size=1.2) +
+  scale_y_continuous(expand=c(0,0), name='Number of classes') +
+  scale_color_distiller(palette='Spectral', name='Class duration') + 
+  scale_x_continuous(expand=c(0,-0.5), name='Start and end years of data collection') + 
+  # ggtitle(paste('Teaching Q2.5 and 2.6: In what year did data collection start and end. Number of respondents:', 
+  #               heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, .N], '/', heedteach[, .N])) + 
+  annotation_custom(ggplotGrob(durahist), 
+                    xmin=1960, xmax=1990, 
+                    ymin=quantile(heedteach[,as.numeric(ResponseId)], .50), 
+                    ymax=quantile(heedteach[,as.numeric(ResponseId)], 0.95)) + 
+  theme_classic() +
+  theme(legend.position=c(0.25, 0.05),
+        legend.direction="horizontal",
+        legend.box.background = element_blank(),
+        legend.background = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_line(color='lightgrey'),
+        panel.grid.minor.x = element_line(color='lightgrey'))
+
+#---- Side plot ----
+sidedat <- data.frame(year=2019,num=cumdat[year==2018, c(cumactive, cumend)],
+                      duration = c(heedteach[Q2.5_1 != -99 & Q2.6_1 != -99 & Q2.6_1==2019, mean(dataduration)],
+                                   heedteach[Q2.5_1 != -99 & Q2.6_1 != -99 & Q2.6_1<2019, mean(dataduration)]),
+                      cat=factor(c('Ongoing', 'Ended'),c('Ongoing', 'Ended')))
+rightside <- ggplot(sidedat, aes(x=year, y=num, fill=cat, 
+                                 label = paste0(cat,': ', round(100*num/cumdat[year==2018,cumstart]), '%'))) + 
+  geom_bar(stat='identity') +
+  geom_text(aes(y=cumdat[year==2018, c((cumstart+cumend)/2, cumend/2)]), angle=-90) + 
+  scale_y_continuous(expand=c(0,0)) +
+  scale_fill_manual(values=c('#99d396', '#72adaa')) +
+  theme_void() + 
+  theme(legend.position = 'none')
+#rightside
+
+#g <- gtable_rbind(ggplotGrob(top), ggplotGrob(main))
+#grid.draw(resize_heights(g, c(1,3)))
+
+#---- Plot out ----
+g <- gtable_cbind(ggplotGrob(main), ggplotGrob(rightside))
+png('results/startendyears.png', width=6, height=6, units='in', res=400)
+grid.draw(resize_widths(g, c(20,1)))
+dev.off()
+
+################ Compute the total number of students or days involved ##########
+#Number of students * number of days * number of times a year * number of years
+heedteach_sub <- heedteach[data.frame(Q8.3=levels(heedteach[,Q8.3]), 
+                                      Q8.3num = c(0,0,2,0.5,1/3,1)), on='Q8.3'][
+                                        ,.(ResponseId, Q8.3num,dataduration,Q9.2_1,Q9.4_1)]
+
+setnames(heedteach_sub, old=c('Q8.3num', 'Q9.2_1', 'Q9.4_1'), new=c('frequency', 'students', 'days'))
+#For those with a missing component, assign median
+heedteach_sub[frequency != 0, `:=`(dataduration = ifelse(is.na(dataduration), median(heedteach_sub$dataduration,na.rm=T), dataduration),
+                     days = ifelse(is.na(days), median(heedteach_sub$days,na.rm=T),days))]
+
+
+#Total number of involved students
+heedteach_sub[, sum(students*frequency*dataduration, na.rm=T)]
+
+#Total number of days
+heedteach_sub[, sum(frequency*days*dataduration, na.rm=T)]
+
+################ What is being collected? #######################
+#---- Biological ----
+#Prep data for chart
+bioqcols <- names(heedteach)[grep('Q12.3', names(data))]
+dat <- heedteach[, (bioqcols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = bioqcols]
+bioqmelt <- melt(dat, id.vars='ResponseId', measure.vars=bioqcols)
+old <- c("Occurrence/abundance/density/biomass (single species or multiple species)", 
+         "Individual physical attributes (body length, mass, leaf area, DBH, sex, age)", 
+         "Life history (e.g. fecundity, age)",
+         "Individual behavior", 
+         "Physiology",
+         "Phenology (e.g. migration timing, date of flowering)",
+         "Biogeochemistry (e.g. stable isotope, nutrient cycling, metabolism)",
+         "Genetics", 
+         "Molecular/Biochemistry",
+         "Other (specify)",
+         "" ,
+         "Ch a, Blue-Green-Algae, dbh",
+         "Biological indices")
+
+new <- c('Species',
+         'Individual attributes',
+         'Individual attributes',
+         'Individual behavior/physiology',
+         'Individual behavior/physiology',
+         'Phenology',
+         'Biogeochemistry',
+         'Genetics/Molecular',
+         'Genetics/Molecular',
+         rep(NA, 4))
+
+bioqmelt[, value := new[match(value, old)]]
+bioqmeltord <- unique(bioqmelt[,value := factor(value, levels = unique(new))][, .(ResponseId, value)])
+
+#Make pie chart
+biopie <- ggplot(bioqmeltord[!is.na(value),list(varn = .N),ResponseId][order(varn),.N, varn], 
+                 aes(x=factor(1), y=N, fill=-varn, label = varn)) + 
+  coord_polar(theta = "y", start=0) +
+  geom_bar(stat='identity', color='black')+
+  geom_text_repel(position = position_stack(vjust = 0.5), size=4, force=0.5, box.padding=0.02, max.iter=100000) +
+  scale_fill_distiller(palette='YlGn')+
+  theme_void()  +
+  theme(legend.position = 'none') 
+
+#Main chart
+biovarplot <- ggplot(bioqmeltord[!is.na(value),], aes(x=value)) + 
+  geom_histogram(stat="count", fill='#addd8e') + 
+  scale_x_discrete(expand=c(0,0), labels = str_wrap(unique(new), width=10), name= 'Data type') + 
+  scale_y_continuous(expand=c(0,0)) + 
+  annotation_custom(ggplotGrob(biopie), 
+                    ymin=50, ymax=135, xmin = 5, xmax = 6) + 
+  # ggtitle(paste(title, '? Number of respondents: ', 
+  #               length(bioqmelt[!is.na(value) & !(value %in% c('','-99')), unique(ResponseId)]), '/', data[, .N])) + 
+  theme_classic() +
+  theme(axis.title= element_blank())
+#biovarplot
+
+
+#---- Physical ----
+phyqcols <- names(heedteach)[grep('Q12.4', names(data))]
+dat <- heedteach[, (phyqcols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = phyqcols]
+phyqmelt <- melt(dat, id.vars='ResponseId', measure.vars=phyqcols)
+old <- unique(phyqmelt$value)
+new <- c('Temp.', NA, NA, 'Light', 'Light', 'Light',
+         'Precip.', 'Topo.', 'Topo.', 'Humidity',
+         'Radia.', 'Sound/Noise', 
+         'Soil attri.',  'Soil attri.', 'Soil attri.',
+         'Veg. coverage', 'Hydrol.', 'Habitat attri.', 'Habitat attri.', 'Hydrol.',
+         'Depth/Bathy.', 'Wind speed', 'Hydrol.', 'Habitat attri.', 'Water attri.', 
+         'Water attri.', 'Water attri.', NA, 'Other', 'Water attri.', 'Soil attri.',
+         'Other', NA, 'Other', 'Light', 'Hydrol.', NA)
+
+phyqmeltord <- unique(phyqmelt[, value := new[match(value, old)]][!is.na(value), .(ResponseId, value)])
+phyqmeltord[, value := factor(value, 
+                        levels = unique(value)[order(-phyqmeltord[, .N, by=value]$N)])]
+
+#Make pie chart
+physpie <- ggplot(phyqmeltord[!is.na(value),list(varn = .N),ResponseId][order(varn),.N, varn], 
+                 aes(x=factor(1), y=N, fill=-varn, label = varn)) + 
+  coord_polar(theta = "y", start=0) +
+  geom_bar(stat='identity', color='black')+
+  geom_text_repel(position = position_stack(vjust = 0.5), size=4, force=0.5, box.padding=0.02, max.iter=100000) +
+  scale_fill_distiller(palette='YlOrRd')+
+  theme_void()  +
+  theme(legend.position = 'none') 
+
+#Make main chart
+physvarplot <- ggplot(phyqmeltord, aes(x=value)) + 
+  geom_histogram(stat="count", fill='#fed976') + 
+  scale_x_discrete(expand=c(0,0), labels = str_wrap(levels(phyqmeltord$value), width=8), name= 'Data type') + 
+  scale_y_continuous(expand=c(0,0)) + 
+  annotation_custom(ggplotGrob(physpie), 
+                    ymin=40, ymax=95, xmin = 11, xmax = 15) + 
+  # ggtitle(paste(title, '? Number of respondents: ', 
+  #               length(phyqmelt[!is.na(value) & !(value %in% c('','-99')), unique(ResponseId)]), '/', data[, .N])) + 
+  theme_classic()+
+  theme(axis.title = element_blank())
+#physvarplot
+
+#---- Chemical ----
+cheqcols <- names(heedteach)[grep('Q12.5.*(?<!TEXT)$', names(data), perl=T)]
+dat <- heedteach[, (cheqcols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = cheqcols]
+cheqmelt <- melt(dat, id.vars='ResponseId', measure.vars=cheqcols)
+old <- unique(cheqmelt$value)
+new <- c(NA, "pH",NA,"EC/Salinity/TDS","Pollutant","N","P","CO3-2 HCO3","Ca","Fe",
+         "Mg","Al","K","H","S","Cl","DO/BOD/COD", "Alka. Acid.", "Other")
+cheqmeltord <- unique(cheqmelt[, value := new[match(value, old)]][!is.na(value), .(ResponseId, value)])
+cheqmeltord[, value := factor(value, levels = unique(value)[order(-cheqmeltord[, .N, by=value]$N)])]
+
+#Make pie chart
+chempie <- ggplot(cheqmeltord[!is.na(value),list(varn = .N),ResponseId][order(varn),.N, varn],  
+                  aes(fill=-varn, label = varn)) + 
+  coord_polar(theta = "y", start=0) +
+  geom_bar(aes(x=factor(1), y=N), stat='identity', color='black')+
+  #geom_histogram(aes(x=varn)) +
+  #coord_polar(theta = "x", start=0) +
+  geom_text_repel(aes(x=factor(1), y=N), position = position_stack(vjust = 0.5), size=4, force=0.5, box.padding=0.02, max.iter=100000) +
+  scale_fill_distiller(palette='PuBu')+
+  theme_void()  +
+  theme(legend.position = 'none') 
+
+#Make main chart
+chemvarplot <- ggplot(cheqmeltord, aes(x=value)) + 
+  geom_histogram(stat="count", fill='#a6bddb') + 
+  scale_x_discrete(expand=c(0,0), labels = str_wrap(levels(cheqmeltord$value), width=5), name= 'Data type') + 
+  scale_y_continuous(expand=c(0,0)) + 
+  annotation_custom(ggplotGrob(chempie), 
+                    ymin=35, ymax=70, xmin = 13, xmax = 17) + 
+  # ggtitle(paste(title, '? Number of respondents: ', 
+  #               length(cheqmelt[!is.na(value) & !(value %in% c('','-99')), unique(ResponseId)]), '/', data[, .N])) + 
+  theme_classic()+
+  theme(axis.title.y = element_blank())
+chemvarplot
+
+#---- Plot out ----
+g <- gtable_rbind(ggplotGrob(biovarplot), ggplotGrob(physvarplot), ggplotGrob(chemvarplot))
+pdf('results/variables.pdf', width=6, height=6)
+grid.draw(g)
+dev.off()
+#Bunch of formatting in inkscape afterward
+
+#---- Compute # of variable type combinations ----
+varnjoin <- merge(bioqmeltord[!is.na(value),list(biovarn = .N),ResponseId], phyqmeltord[!is.na(value),list(phyvarn = .N),ResponseId], 
+                  on='ResponseId', all.x=T, all.y=T) %>%
+  merge(cheqmeltord[!is.na(value),list(chemvarn = .N),ResponseId], on='ResponseId', all.x=T, all.y=T)
+varncols <- c('biovarn', 'phyvarn', 'chemvarn')
+varnjoin[,(varncols) := lapply(.SD, function(x) ifelse(is.na(x), 0, 1)), .SDcols = varncols][
+  ,combination := paste0(biovarn, phyvarn, chemvarn)]
+table(varnjoin$combination)
+varnjoin[,.N]
+          
+
+
+
+################ Q16.2 - Main challenges to implementing and maintaining class-based data collection? ########
+#---- Format data ----
+q16_2format <- likertformat(heedteach, heednumteach, 'Q16[.]2.*[^TEXT]$',diverging = TRUE)
+q16_2format_summary <- q16_2format[!is.na(value),{
+  tot = .N
+  .SD[,.(frac=.N/tot),by=value]
+},by=variable]
+q16_2format_summaryattri <- q16_2format_summary[unique(q16_2format[,.(variable, value, i.value, choices, varmean, N)]),
+                                                on= c('variable','value'), nomatch=0] %>%
+  .[, frac2 := ifelse(value ==0, frac/2, frac)]
+
+
+up <- q16_2format_summaryattri[value >= 0 & choices != ' - Other (please specify)',] %>%
+  .[, value := factor(value, levels= unique(value)[order(value)])]
+down <- q16_2format_summaryattri[value <= 0 & choices != ' - Other (please specify)',] %>%
+  .[, value := factor(value, levels= unique(value)[order(value)])]
+
+challengelabels <- gsub('\\s*\\([^\\)]+\\)|^\\s*\\-\\s*', '', 
+                        unique(q16_2format[choices != ' - Other (please specify)', choices])) #format labels
+
+#Inspect 'Others'
+heedteach[!(Q19.1 %in% c('','-99')),"Q16.2_8_TEXT", with=FALSE]
+
+#---- Plot out ----
+challengeplot <- ggplot(q16_2format_summaryattri[order(q16_2format_summaryattri$value, q16_2format_summaryattri$variable),]) + 
+  geom_bar(data = up, aes(x = variable, y = 100*frac2, fill = value),
+           stat = "identity", position = position_stack(reverse = TRUE)) + 
+  geom_bar(data = down, aes(x = variable, y = -100*frac2, fill = value),
+           stat = "identity", position = position_stack()) +
+  scale_x_discrete(name = 'Challenge', labels = str_wrap(challengelabels, width=10)) +
+  scale_y_continuous(name= '% of responses', expand=c(0,0), limits=c(-100,100), breaks=seq(-100,100,25),labels=commapos) +
+  theme_classic() + 
+  coord_flip() +
+  scale_fill_manual(values = c('#dfc27d', '#a6611a', '#f5f5f5', '#80cdc1', '#018571'), 
+                    labels= unique(q16_2format_summaryattri[order(value),]$i.value)) +
+  theme(legend.title = element_blank(),
+        #axis.title.y =  element_blank(),
+        #axis.title.x =  element_blank(),
+        panel.grid.major.x = element_line(color='lightgrey'),
+        legend.position = c(0.15, 0.15),
+        legend.background = element_blank(),
+        text= element_text(size=12))
+challengeplot
+
+png('results/challenges.png', width=6, height=6, units='in', res=600)
+print(challengeplot)
+dev.off()
+
+################ Q15.2 and Q15.8 student and teacher benefits ########################
+#---- Format data for student benefits ----
+q15_2format <- likertformat(heedteach, heednumteach, 'Q15[.]2.*[^TEXT]$')
+q15_2format_summary <- q15_2format[!is.na(value),{
+  tot = .N
+  .SD[,.(frac=.N/tot),by=value]
+},by=variable]
+q15_2format_summaryattri <- q15_2format_summary[unique(q15_2format[,.(variable, value, i.value, choices, varmean, N)]),
+                                              on= c('variable','value'), nomatch=0] %>%
+  .[data.frame(choices = unique(q15_2format_summaryattri[choices != ' - Other', choices]),
+               formatlabels = c('Field sampling', 'Lab. methods', 'Data analysis', 
+                             'Collaborative research','Scientific writing', 'Public speaking', 'Scientific process',
+                             'Networking w/ scientists','Relationship building w/ classmates', 'Increased topical interest', 'Awareness of nature'),
+               groupin = factor(c(rep('Hard skills', 3), rep('Soft skills', 4), rep('Personal growth', 4)), 
+                              levels=c( 'Personal growth', 'Hard skills', 'Soft skills')),
+               groupout = rep('Benefits to students', 11)),
+               on='choices']
+
+q15_2format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(formatlabels[order(varmean)])))]
+#,groupin = factor(groupin,levels = unique(groupin)[order(-q15_2format_summaryattri[, mean(varmean), by=groupin]$V1)])
+
+#---- format data for instructors' benefits ----
+q15_8format <- likertformat(heedteach, heednumteach, 'Q15[.]8.*[^TEXT]$')
+q15_8format_summary <- q15_8format[!is.na(value),{
+  tot = .N
+  .SD[,.(frac=.N/tot),by=value]
+},by=variable]
+q15_8format_summaryattri <- q15_8format_summary[unique(q15_8format[,.(variable, value, i.value, choices, varmean, N)]),
+                                                on= c('variable','value'), nomatch=0] %>%
+  .[data.frame(choices = unique(q15_8format_summaryattri[choices != ' - Other (please specify)', choices]),
+               formatlabels = c('Ideas & data for projects', 'Career advancement', 'Peer recognition', 
+                                'Mentoring students','Inspiration'),
+               groupin = factor(c(rep('Academic growth', 3), rep('Personal growth', 2)), 
+                                levels=c('Academic growth', 'Personal growth')),
+               groupout = rep('Benefits to instructors', 5)),
+    on='choices']
+
+q15_8format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(formatlabels[order(varmean)])),
+                                groupin = factor(groupin, 
+                                                 levels = unique(groupin)[order(-q15_8format_summaryattri[, mean(varmean), by=groupin]$V1)]))]
+
+#---- Plot out ----
+benefitplot <- ggplot(rbind(q15_2format_summaryattri, q15_8format_summaryattri), 
+                            (aes(x=formatlabels, y=100*frac, fill=interaction(factor(value), groupout)))) +
+  geom_bar(stat="identity", alpha=0.8) + 
+  #geom_bar(data = q15_8format_summaryattri[order(q15_8format_summaryattri$value, q15_8format_summaryattri$variable),], stat="identity", alpha=0.8) + 
+  scale_x_discrete(labels = function(x) str_wrap(x, width=15)) +
+  scale_y_continuous(name= '% of responses', expand=c(0,0)) +
+  scale_fill_manual(values=c(brewer.pal(4, "RdPu"), brewer.pal(4, "YlGnBu")), 
+                    labels = rep(rev(levels(q15_2format_summaryattri$i.value)),2)) + 
+  coord_flip() +
+  facet_grid(groupout*groupin~., scales ='free_y', space='free', switch='y') +
+  theme_minimal() + 
+  theme(text = element_text(size=12), 
+        axis.title.y = element_blank(),
+        legend.title = element_blank(),
+        axis.line = element_line(color='black', size=1),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y = element_text(face='bold'))
+
+pdf('results/benefits.pdf', width=6, height=8)
+print(benefitplot)
+dev.off()
+#Quick formatting in inkscape afterward
