@@ -1217,7 +1217,27 @@ dev.off()
 
 ################ Data availability ########################
 #---- Q18.2 - How are/were data stored for purposes other than the class? ----
-multiAhisto(heedteach, pattern= 'Q18[.]2.*[^TEXT]$', xaxis = '') 
+check <- dcast(multiformat(heedteach, 'Q18[.]2.*(TEXT)*$'), ResponseId~variable, var.name = value) #No need to include other
+
+q18.2melt <- multiformat(heedteach, 'Q18[.]2.*[^TEXT]$') %>%
+  .[data.frame(value=unique(q18.2melt$value),
+             formatlabels = factor(c('Hard copies', NA, 'Local computer storage', 'Restricted cloud-based', 'Public respository', 
+                              'None, samples not analyzed yet','None, data not archived', 'Other'),
+                              levels = rev(c('Public respository',  'Restricted cloud-based', 'Local computer storage', 
+                                         'Hard copies', 'None, data not archived', 'None, samples not analyzed yet', 'Other', NA)))),
+    on = 'value']
 
 
+storageplot <- ggplot(q18.2melt[!is.na(value) & !(value %in% c('Other','','-99')), .SD[which.max(formatlabels)], by = 'ResponseId'],
+            aes(x=formatlabels)) + 
+  geom_bar(aes(y=100*(..count..)/sum(..count..)), alpha=0.8) + 
+  scale_x_discrete(expand=c(0,0), labels=function(x) {str_wrap(x, width=20)}) + 
+  scale_y_continuous(expand=c(0,0), '% of responses') + 
+  coord_flip() +
+  theme_classic() + 
+  theme(axis.title.y = element_blank(),
+        panel.grid.major.x = element_line(color='lightgray'))
+png('results/storage.png', width=4, height=4, unit='in', res=600)
+storageplot
+dev.off()
 
