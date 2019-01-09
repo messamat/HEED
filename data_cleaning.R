@@ -1,4 +1,5 @@
 #+ fig.width=10, fig.height=6, dpi=300, out.width="1920px",out.height="1080px"
+############# Import libraries ##################
 library(ggplot2)
 library(scales)
 library(grid)
@@ -15,8 +16,10 @@ library(knitr)
 library(kableExtra)
 library(ggrepel)
 
+############# Import and format data ##################
+
 #Import data
-setwd('C:/Mathis/SAFS/HEED') ##UPDATE##
+setwd(gsub('\\/src.*', '', getwd())) ##UPDATE##
 heed <-read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_text.csv')
 heednum <- read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_numeric.csv')
 
@@ -40,7 +43,7 @@ heededit <- read.csv('data/heedsel_edit_20181219.csv')
 
 #TO DO: integrate changes to table in the code for those that weren't already included
 #library(arsenal)
-#heededit2 <- read.csv('data/heedsel_edit_20181018.csv')
+#heededit <- read.csv('data/heedsel_edit_20181018.csv')
 #cmp <- compare(heededit, heededit2)
 #diffs(cmp, by.var = TRUE)
 #diffs(cmp, vars = c("ps", "ast"))
@@ -95,7 +98,7 @@ heednumteach <- setDT(heednum)[ResponseId %in% heedteach$ResponseId,
 heednumnoteach <- setDT(heednum)[ResponseId %in% heednoteach$ResponseId,
                                  colnames(heednum) %in% colnames(heednoteach), with=FALSE] 
 
-#_________________________________________________________________________
+#_________________________________________________________________________####
 # QA/QC AND PLOT DATA 
 # For those survey respondents that teach a field-based class 
 #________________________________________________________________________####
@@ -1038,8 +1041,7 @@ dev.off()
 #Quick formatting in inkscape afterward
 
 
-################ Data availability and vulnerability ########################
-
+################ Data availability ########################
 #---- Q2.4 did you keep data? ----
 ggplot(heedteach[!(get('Q2.4') %in% c('-99',-99,'')),], aes(x=Q2.4)) + 
   geom_histogram(stat="count") + 
@@ -1047,84 +1049,175 @@ ggplot(heedteach[!(get('Q2.4') %in% c('-99',-99,'')),], aes(x=Q2.4)) +
   scale_y_continuous(expand=c(0,0)) + 
   theme_classic()
 
-#---- Q18.2 - How are/were data stored for purposes other than the class? ----
-multiAhisto(heedteach, pattern= 'Q18[.]2.*[^TEXT]$', xaxis = '') 
+#---- Row 1: Q18.3 - Do you currently share the data collected as part of this class?----
+share_plot <- ggplot(heedteach[!(get('Q18.3') %in% c('-99',-99,'')),][, Q18.3 := factor(Q18.3, levels=c('Yes', 'No'))], 
+                     aes(Q18.3, fill = Q18.3)) + 
+  geom_bar(aes(y=100*(..count..)/sum(..count..)), alpha=0.8) + 
+  scale_fill_manual(values=c('#80cdc1', '#dfc27d')) +
+  scale_x_discrete(expand=c(0,0), name='') + 
+  scale_y_continuous(expand=c(0,0), name='% of responses') + 
+  theme_classic() + 
+  theme(legend.position = 'none')
+share_plot
 
-#---- Q18.3 - Do you currently share the data collected as part of this class?----
-share_plot <- singleAplot(heedteach, 'Q18.3')
-
-#---- Q18.4 - At what level(s) do you currently share your data?----
+#---- Row 2 Yes: Q18.4 - At what level(s) do you currently share your data?----
 q18.4cols <- names(heedteach)[grep('Q18.4', names(heedteach))]
 dat <- heedteach[, (q18.4cols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = q18.4cols]
-check <- dat[, .SD, .SDcols = c('ResponseId', q18.4cols)]
+check <- dat[, .SD, .SDcols = c('ResponseId', 'Q2.4', q18.4cols)] #Don't get why people said that they collected data, didn't keep them, and yet are currently sharing them. Ignore
 q18.4melt <- melt(dat, id.vars='ResponseId', measure.vars=q18.4cols) %>%
   .[!(value %in% c('', NA)),] %>%
   .[ value =='Access through the national phenology network', value := 'Open online access'] %>%
-  .[ value =='Access through the national phenology network', value := 'Open online access']
+  .[ value =='Only for government agency partners and educational purpose', value := 'Only for government partners and education']
 
 q18.4melt[, value := factor(value, 
-                            levels = rev(c('Open online access', 'Only for government agency partners and educational purpose',
+                            levels = rev(c('Open online access', 'Only for government partners and education',
                                            'Available upon request','With students on the course within and across years')))] #unique(value)[order(q18.4melt[,.N, by=value]$N)]
 
 
 sharelevel_plot <- ggplot(q18.4melt[value != 'Other',.SD[which.max(value)], by = 'ResponseId'], aes(x=value)) + 
-  geom_bar(aes(y = 100*(..count..)/sum(..count..))) + 
-  scale_x_discrete(expand=c(0,0), labels = function(x) {str_wrap(x, width=25)}) + 
+  geom_bar(aes(y = 100*(..count..)/sum(..count..)), fill='#80cdc1', alpha=0.8) + 
+  scale_x_discrete(expand=c(0,0), labels = function(x) {str_wrap(x, width=20)}) + 
   scale_y_continuous(expand=c(0,0), name='% of responses') + 
   coord_flip () +
   theme_classic() +
-  theme(axis.title.y = element_blank())
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank())
 
 
-#---- Q18.5 - What level(s) of data sharing would you be interested in, if any? ----
+#---- Row 2 No: Q18.5 - What level(s) of data sharing would you be interested in, if any? ----
 q18.5cols <- names(heedteach)[grep('Q18.5', names(heedteach))]
 dat <- heedteach[, (q18.5cols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = q18.5cols]
-check <- dat[, .SD, .SDcols = c('ResponseId', q18.5cols)]
+check <- dat[, .SD, .SDcols = c('ResponseId', 'Q2.4', q18.5cols)]
 q18.5melt <- melt(dat, id.vars='ResponseId', measure.vars=q18.5cols) %>%
   .[!(value %in% c('', NA)),] %>%
-  .[ value =='Access through the national phenology network', value := 'Open online access'] %>%
-  .[ value =='Access through the national phenology network', value := 'Open online access']
-
-q18.5melt[, value := factor(value, 
-                            levels = rev(c('Open online access', 'Only for government agency partners and educational purpose',
-                                           'Available upon request','With students on the course within and across years')))] #unique(value)[order(q18.4melt[,.N, by=value]$N)]
-
-
+  .[ value =='Only for government agency partners and educational purpose', value := 'Only for government partners and education'] %>%
+  .[value %in% c('too busy at present; 1-2 y time',  'I am interested in sharing it, but not sure how the other more senior instructors feel.',
+                 'The data exists in student lab reports. Each report would have to be independantly combed through to recollect the data',
+                 'Being used by other researchers at my institution and not up to me'), 
+    value := 'Not able to share at the moment'] %>%
+  .[value %in% c('The quality of the student-collected data is too poor to share the data.',
+                 'Quality is not good enough to share.', 'I would not trust a good deal of the data collected.'), 
+    value := 'Not interested due to insufficient data quality'] %>%
+  .[value %in% c('Depending on the data usage','Depending on the agreement among instructors',
+                 'Shared scientific publications', 'not applicable', 'Unclear'), 
+    value := 'Other or not applicable'] %>%
+  .[, value := factor(value, 
+                      levels = rev(c('Not interested in data sharing for the moment', 'Not able to share at the moment', 
+                                     'Open online access', 'Available upon request', 'Only for government partners and education',
+                                     'Other or not applicable')))]
 nosharelevel_plot <- ggplot(q18.5melt[value != 'Other',.SD[which.max(value)], by = 'ResponseId'], aes(x=value)) + 
-  geom_bar(aes(y = 100*(..count..)/sum(..count..))) + 
-  scale_x_discrete(expand=c(0,0), labels = function(x) {str_wrap(x, width=25)}) + 
+  geom_bar(aes(y = 100*(..count..)/sum(..count..)), fill='#dfc27d', alpha=0.8) + 
+  scale_x_discrete(expand=c(0,0), labels = function(x) {str_wrap(x, width=20)}) + 
   scale_y_continuous(expand=c(0,0), name='% of responses') + 
   coord_flip () +
   theme_classic() +
-  theme(axis.title.y = element_blank())
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank())
+nosharelevel_plot
 
-#---- Q18.6 - Under what condition(s) do you share your data? ----
-sharecondition_plot <- multiAhisto(heedteach, 'Q18.6', xaxis='Choice')
 
-#---- Q18.7 - Under what condition(s) would you be interested in sharing your data, if any? ----
-nosharecondition_plot <- multiAhisto(heedteach, 'Q18.7', xaxis='Choice')
+#---- Row 3 Yes: Q18.6 - Under what condition(s) do you share your data? ----
+q18.6cols <- names(heedteach)[grep('Q18.6', names(heedteach))]
+dat <- heedteach[, (q18.6cols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = q18.6cols]
+check <- dat[, .SD, .SDcols = c('ResponseId', 'Q2.4', q18.6cols)]
+q18.6melt <- melt(dat, id.vars='ResponseId', measure.vars=q18.6cols) %>%
+  .[!(value %in% c('', NA)),] %>%
+  .[, value := factor(value, 
+                      levels = rev(c('Require authorship', 'Require citation', 'Require acknowledgment',
+                                     'Depends on the data use', 'No requirement', 'Other', 'No one has asked yet!',
+                                     'None for those released through public databases', 'Past years data shared with current years students',
+                                     'To the Natural Hertiage Museum where collection data is stored.')))]
+unique(q18.6melt$value)
 
-#---- Q18.8 - Would you be interested in an online community repository specifically designed to host class-based ecological datasets? ----
+sharecondition_plot <- ggplot(q18.6melt[,.SD[which.max(value)], by = 'ResponseId'], aes(x=value)) + 
+  geom_bar(aes(y = 100*(..count..)/sum(..count..)), fill='#80cdc1', alpha=0.8) + 
+  scale_x_discrete(expand=c(0,0), labels = function(x) {str_wrap(x, width=20)}) + 
+  scale_y_continuous(expand=c(0,0), name='% of responses') + 
+  coord_flip () +
+  theme_classic() +
+  theme(axis.title = element_blank())
+sharecondition_plot
+
+#---- Row 3 No: Q18.7 - Under what condition(s) would you be interested in sharing your data, if any? ----
+q18.7cols <- names(heedteach)[grep('Q18.7', names(heedteach))]
+dat <- heedteach[, (q18.7cols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = q18.7cols]
+check <- dat[, .SD, .SDcols = c('ResponseId', 'Q2.4', q18.7cols)]
+q18.7melt <- melt(dat, id.vars='ResponseId', measure.vars=q18.7cols) %>%
+  .[!(value %in% c('', NA)),] %>%
+  .[value == 'I don`t understand the question', value := NA] %>%
+  .[, value := factor(value,
+                      levels = rev(c('Require authorship', 'Require citation', 'Require acknowledgment',
+                                     'Depends on the data use', 'No requirement', 'Other')))]
+#unique(q18.7melt$value)
+
+nosharecondition_plot <- ggplot(q18.7melt[,.SD[which.max(value)], by = 'ResponseId'], aes(x=value)) + 
+  geom_bar(aes(y = 100*(..count..)/sum(..count..)), fill='#dfc27d', alpha=0.8) + 
+  scale_x_discrete(expand=c(0,0), labels = function(x) {str_wrap(x, width=20)}) + 
+  scale_y_continuous(expand=c(0,0), name='% of responses') + 
+  coord_flip () +
+  theme_classic() +
+  theme(axis.title = element_blank())
+nosharecondition_plot 
+
+#---- Row 4 Q18.8 - Would you be interested in an online community repository specifically designed to host class-based ecological datasets? ----
 q18_8format <- likertformat(heedteach, heednumteach, 'Q18[.]8.*[^TEXT]$',diverging = TRUE)
-likertstackedbar(q18_8format, diverging=TRUE) 
+q18_8format[, `:=`(share = ifelse(ResponseId %in% heedteach[Q18.3=='Yes', as.character(ResponseId)],'Yes', 'No'),
+                   value = -value)]
+q18_8format_summary <- q18_8format[!is.na(value) & value != '',{
+  tot = .N
+  .SD[,.(frac=.N/tot),by=value]
+},by=.(variable,share)]
+
+q18_8format_summaryattri <- q18_8format_summary[unique(q18_8format[,.(variable, value, i.value, choices, varmean, N, share)]),
+                                                on= c('variable','value','share'), nomatch=0] %>%
+  .[, frac2 := ifelse(value == 0, frac/2, frac)]  %>%
+  .[, i.value := factor(i.value, levels=c("Probably yes","Definitely yes","Might or might not","Probably not"))]
+
+up <- q18_8format_summaryattri[value >= 0 & choices != ' - Other (please specify)',] %>%
+  .[, value := factor(value, levels= unique(value)[order(value)])]
+down <- q18_8format_summaryattri[value <= 0 & choices != ' - Other (please specify)',] %>%
+  .[, value := factor(value, levels= unique(value)[order(-value)])]
+
+onlinerepo <- ggplot(q18_8format_summaryattri[order(q18_8format_summaryattri$value, q18_8format_summaryattri$variable),]) + 
+  geom_hline(yintercept=0) +
+  geom_bar(data = up,aes(x = share, y = 100*frac2, fill = interaction(share, value)),
+           stat = "identity", position = position_stack(reverse = TRUE), alpha=0.8) + 
+  geom_bar(data = down,aes(x = share, y = -100*frac2, fill = interaction(share, factor(value, levels=c('-1.5', '-0.5')))),
+           stat = "identity", position = position_stack(reverse = TRUE), alpha=0.8) +
+  scale_x_discrete(name = 'Currently sharing') +
+  scale_y_continuous(name= '% of responses', expand=c(0,0), limits=c(-100,100), breaks=seq(-100,100,25),labels=commapos) +
+  scale_fill_manual(values=c('#543005', '#8c510a', '#bf812d', '#dfc27d', '#01665e','#35978f', '#80cdc1'), 
+                    labels = rep(rev(levels(q18_8format_summaryattri$i.value)),2)) + 
+  theme_classic() + 
+  coord_flip() +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.3,0.5))
+onlinerepo
 
 #---- Plot it out ----
+datagrobs <- list(arrangeGrob(share_plot, top='Do you currently share the data collected as part of this class?'),
+                  textGrob("Level of sharing"),
+                  arrangeGrob(sharelevel_plot), arrangeGrob(nosharelevel_plot),
+                  textGrob("Conditions of use"),
+                  arrangeGrob(sharecondition_plot), arrangeGrob(nosharecondition_plot),
+                  textGrob("Interest in online community repository"),
+                  arrangeGrob(onlinerepo))
+lay <- rbind(c(NA, 1, 1,NA),
+             c(NA, 2, 2,NA),
+             c(3, 3, 4, 4),
+             c(NA, 5, 5,NA),
+             c(6, 6, 7, 7),
+             c(NA, 8, 8,NA),
+             c(NA, 9, 9,NA))
 
-grid.newpage()               
-grid.draw(gtable_rbind(gtable_rbind(gtable_frame(ggplotGrob(share_plot)),
-                                    gtable_frame(gtable_cbind(ggplotGrob(sharelevel_plot), ggplotGrob(nosharelevel_plot)))),
-                       gtable_frame(gtable_cbind(ggplotGrob(sharecondition_plot), ggplotGrob(nosharecondition_plot)))))
+pdf('results/sharing.pdf', width=6, height=9)
+grid.arrange(grobs = datagrobs, layout_matrix = lay, heights=unit(c(8,1,10,1,10,1,8), rep('null', 5)))
+dev.off()
 
-#Multi a histo
-qmelt <- multiformat(data, pattern)
-title <- tstrsplit(qstext[rownames(qstext) == qmelt$variable[1], 1], '?', fixed=T)[[1]]
-p <- ggplot(qmelt[!is.na(value) & !(value %in% c('Other (please specify)','','-99')),], aes(x=value)) + 
-  geom_histogram(stat="count") + 
-  scale_x_discrete(expand=c(0,0), name=xaxis) + 
-  scale_y_continuous(expand=c(0,0)) + 
-  ggtitle(paste(title, '? Number of respondents: ', 
-                length(qmelt[!is.na(value) & !(value %in% c('','-99')), unique(ResponseId)]), '/', data[, .N])) + 
-  theme_classic() +
-  theme(axis.text.x = element_text(angle=10, vjust=0.5))
 
-multiAhisto(heedteach, pattern= 'Q2[.]4.*[^TEXT]$', xaxis = '') 
+################ Data availability ########################
+#---- Q18.2 - How are/were data stored for purposes other than the class? ----
+multiAhisto(heedteach, pattern= 'Q18[.]2.*[^TEXT]$', xaxis = '') 
+
+
+
