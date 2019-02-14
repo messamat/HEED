@@ -21,8 +21,6 @@ library(extrafont)
 extrafont::loadfonts()
 
 ############# Import and format data ##################
-
-#Import data
 setwd(gsub('\\/src.*', '', getwd())) ##UPDATE##
 heed <-read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_text.csv')
 heednum <- read.csv('data/Higher Education Ecological Data (HEED)_October 18, 2018_numeric.csv')
@@ -47,7 +45,7 @@ heededit <- read.csv('data/heedsel_edit_20181219.csv')
 
 #TO DO: integrate changes to table in the code for those that weren't already included
 #library(arsenal)
-#heededit <- read.csv('data/heedsel_edit_20181018.csv')
+#heededit2 <- read.csv('data/heedsel_edit_20181018.csv')
 #cmp <- compare(heededit, heededit2)
 #diffs(cmp, by.var = TRUE)
 #diffs(cmp, vars = c("ps", "ast"))
@@ -766,7 +764,7 @@ heedteach_sub <- heedteach[data.frame(Q8.3=levels(heedteach[,Q8.3]),
 setnames(heedteach_sub, old=c('Q8.3num', 'Q9.2_1', 'Q9.4_1'), new=c('frequency', 'students', 'days'))
 #For those with a missing component, assign median
 heedteach_sub[frequency != 0, `:=`(dataduration = ifelse(is.na(dataduration), median(heedteach_sub$dataduration,na.rm=T), dataduration),
-                     days = ifelse(is.na(days), median(heedteach_sub$days,na.rm=T),days))]
+                                   days = ifelse(is.na(days), median(heedteach_sub$days,na.rm=T),days))]
 
 
 #Total number of involved students
@@ -778,7 +776,7 @@ heedteach_sub[, sum(frequency*days*dataduration, na.rm=T)]
 ################ What is being collected? #######################
 #---- Biological ----
 #Prep data for chart
-bioqcols <- names(heedteach)[grep('Q12.3', names(data))]
+bioqcols <- names(heedteach)[grep('Q12.3', names(heedteach))]
 dat <- heedteach[, (bioqcols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), .SDcols = bioqcols]
 bioqmelt <- melt(dat, id.vars='ResponseId', measure.vars=bioqcols)
 old <- c("Occurrence/abundance/density/biomass (single species or multiple species)", 
@@ -849,11 +847,11 @@ new <- c('Temp.', NA, NA, 'Light', 'Light', 'Light',
 
 phyqmeltord <- unique(phyqmelt[, value := new[match(value, old)]][!is.na(value), .(ResponseId, value)])
 phyqmeltord[, value := factor(value, 
-                        levels = unique(value)[order(-phyqmeltord[, .N, by=value]$N)])]
+                              levels = unique(value)[order(-phyqmeltord[, .N, by=value]$N)])]
 
 #Make pie chart
 physpie <- ggplot(phyqmeltord[!is.na(value),list(varn = .N),ResponseId][order(varn),.N, varn], 
-                 aes(x=factor(1), y=N, fill=-varn, label = varn)) + 
+                  aes(x=factor(1), y=N, fill=-varn, label = varn)) + 
   coord_polar(theta = "y", start=0) +
   geom_bar(stat='identity', color='black')+
   geom_text_repel(position = position_stack(vjust = 0.5), size=4, force=0.5, box.padding=0.02, max.iter=100000) +
@@ -925,9 +923,6 @@ varnjoin[,(varncols) := lapply(.SD, function(x) ifelse(is.na(x), 0, 1)), .SDcols
   ,combination := paste0(biovarn, phyvarn, chemvarn)]
 table(varnjoin$combination)
 varnjoin[,.N]
-          
-
-
 
 ################ Q16.2 - Main challenges to implementing and maintaining class-based data collection? ########
 #---- Format data ----
@@ -957,7 +952,7 @@ heedteach[!(Q19.1 %in% c('','-99')),"Q16.2_8_TEXT", with=FALSE]
 
 #---- Plot out ----
 #up[order(varmean),unique(choices
-                         
+
 challengeplot <- ggplot() + 
   geom_bar(data = up, aes(x = variable_short, y = 100*frac2, fill = value),
            stat = "identity", position = position_stack(reverse = TRUE)) + 
@@ -990,7 +985,7 @@ q5_3format_summary <- q5_3format[!is.na(value),{
   .SD[,.(frac=.N/tot),by=value]
 },by=variable]
 q5_3format_summaryattri <- q5_3format_summary[unique(q5_3format[,.(variable, value, i.value, choices, varmean, N)]),
-                                                on= c('variable','value'), nomatch=0] %>%
+                                              on= c('variable','value'), nomatch=0] %>%
   .[, frac2 := ifelse(value ==0, frac/2, frac)] %>%
   .[, challengelabels := gsub('\\s*\\([^\\)]+\\)|^\\s*\\-\\s*', '', choices)] #format labels
 
@@ -1047,7 +1042,7 @@ q15_2format_summary <- q15_2format[!is.na(value),{
   .SD[,.(frac=.N/tot),by=value]
 },by=variable]
 q15_2format_summaryattri <- q15_2format_summary[unique(q15_2format[,.(variable, value, i.value, choices, varmean, N)]),
-                                              on= c('variable','value'), nomatch=0]
+                                                on= c('variable','value'), nomatch=0]
 q15_2format_summaryattri <- q15_2format_summaryattri[
   data.frame(choices = unique(q15_2format_summaryattri[choices != ' - Other', choices]),
              formatlabels = c('Field sampling', 'Lab. methods', 'Data analysis', 
@@ -1086,7 +1081,7 @@ q15_8format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(forma
 
 #---- Plot out ----
 benefitplot <- ggplot(rbind(q15_2format_summaryattri, q15_8format_summaryattri), 
-                            (aes(x=formatlabels, y=100*frac, fill=interaction(factor(value), groupout)))) +
+                      (aes(x=formatlabels, y=100*frac, fill=interaction(factor(value), groupout)))) +
   geom_bar(stat="identity", alpha=0.8) + 
   #geom_bar(data = q15_8format_summaryattri[order(q15_8format_summaryattri$value, q15_8format_summaryattri$variable),], stat="identity", alpha=0.8) + 
   geom_text(aes(y = 5, label = paste0('Mean ', round(varmean,2))), hjust = 0) +
@@ -1122,7 +1117,7 @@ q5_1format_summary <- q5_1format[!is.na(value),{
   .SD[,.(frac=.N/tot),by=value]
 },by=variable]
 q5_1format_summaryattri <- q5_1format_summary[unique(q5_1format[,.(variable, value, i.value, choices, varmean, N)]),
-                                                on= c('variable','value'), nomatch=0] 
+                                              on= c('variable','value'), nomatch=0] 
 q5_1format_summaryattri <- q5_1format_summaryattri[
   data.frame(choices = unique(q5_1format_summaryattri[choices != 'Other (please specify)', choices]),
              formatlabels = c('Field sampling', 'Lab. methods', 'Data analysis', 
@@ -1144,25 +1139,25 @@ q5_2format_summary <- q5_2format[!is.na(value),{
   .SD[,.(frac=.N/tot),by=value]
 },by=variable]
 q5_2format_summaryattri <- q5_2format_summary[unique(q5_2format[,.(variable, value, i.value, choices, varmean, N)]),
-                                                on= c('variable','value'), nomatch=0] %>%
+                                              on= c('variable','value'), nomatch=0] %>%
   .[choices %in% unique(choices)[5:20], ]
 q5_2format_summaryattri <- q5_2format_summaryattri[
   data.frame(choices = unique(q5_2format_summaryattri[choices != 'Other (please specify)', choices]),
-               formatlabels = c('Ideas & data for projects', 'Peer recognition', 'Career advancement', 
-                                'Mentoring students','Inspiration'),
-               groupin = factor(c(rep('Academic growth', 3), rep('Personal growth', 2)), 
-                                levels=c('Academic growth', 'Personal growth')),
-               groupout = rep('Benefits to instructors', 5),
+             formatlabels = c('Ideas & data for projects', 'Peer recognition', 'Career advancement', 
+                              'Mentoring students','Inspiration'),
+             groupin = factor(c(rep('Academic growth', 3), rep('Personal growth', 2)), 
+                              levels=c('Academic growth', 'Personal growth')),
+             groupout = rep('Benefits to instructors', 5),
              respondent = paste0('Prospective', max(N))),
-    on='choices']
+  on='choices']
 
 q5_2format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(formatlabels[order(varmean)])),
-                                groupin = factor(groupin, 
-                                                 levels = unique(groupin)[order(-q5_2format_summaryattri[, mean(varmean), by=groupin]$V1)]))]
+                               groupin = factor(groupin, 
+                                                levels = unique(groupin)[order(-q5_2format_summaryattri[, mean(varmean), by=groupin]$V1)]))]
 
 #---- Plot out ----
 benefitplot_prospect <- ggplot(rbind(q5_1format_summaryattri, q5_2format_summaryattri), 
-                      (aes(x=formatlabels, y=100*frac, fill=interaction(factor(value), groupout)))) +
+                               (aes(x=formatlabels, y=100*frac, fill=interaction(factor(value), groupout)))) +
   geom_bar(stat="identity", alpha=0.8) + 
   geom_text(aes(y = 5, label = paste0('Mean ', round(varmean,2))), hjust = 0) +
   #geom_bar(data = q5_2format_summaryattri[order(q5_2format_summaryattri$value, q5_2format_summaryattri$variable),], stat="identity", alpha=0.8) + 
@@ -1367,21 +1362,21 @@ grid.arrange(grobs = datagrobs, layout_matrix = lay, heights=unit(c(8,1,10,1,10,
 dev.off()
 
 
-################ Data availability ########################
+################ Data vulnerability ########################
 #---- Q18.2 - How are/were data stored for purposes other than the class? ----
 check <- dcast(multiformat(heedteach, 'Q18[.]2.*(TEXT)*$'), ResponseId~variable, var.name = value) #No need to include other
 
 q18.2melt <- multiformat(heedteach, 'Q18[.]2.*[^TEXT]$') %>%
   .[data.frame(value=unique(q18.2melt$value),
-             formatlabels = factor(c('Hard copies', NA, 'Local computer storage', 'Restricted cloud-based', 'Public respository', 
-                              'None, samples not analyzed yet','None, data not archived', 'Other'),
-                              levels = rev(c('Public respository',  'Restricted cloud-based', 'Local computer storage', 
-                                         'Hard copies', 'None, data not archived', 'None, samples not analyzed yet', 'Other', NA)))),
+               formatlabels = factor(c('Hard copies', NA, 'Local computer storage', 'Restricted cloud-based', 'Public respository', 
+                                       'None, samples not analyzed yet','None, data not archived', 'Other'),
+                                     levels = rev(c('Public respository',  'Restricted cloud-based', 'Local computer storage', 
+                                                    'Hard copies', 'None, data not archived', 'None, samples not analyzed yet', 'Other', NA)))),
     on = 'value']
 
 
 storageplot <- ggplot(q18.2melt[!is.na(value) & !(value %in% c('Other','','-99')), .SD[which.max(formatlabels)], by = 'ResponseId'],
-            aes(x=formatlabels)) + 
+                      aes(x=formatlabels)) + 
   geom_bar(aes(y=100*(..count..)/sum(..count..)), alpha=0.8) + 
   scale_x_discrete(expand=c(0,0), labels=function(x) {str_wrap(x, width=20)}) + 
   scale_y_continuous(expand=c(0,0), '% of responses') + 
@@ -1392,4 +1387,3 @@ storageplot <- ggplot(q18.2melt[!is.na(value) & !(value %in% c('Other','','-99')
 png('results/storage.png', width=4, height=4, unit='in', res=600)
 storageplot
 dev.off()
-
