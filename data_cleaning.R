@@ -14,6 +14,10 @@ library(leaflet)
 library(knitr)
 library(kableExtra)
 library(ggrepel)
+library(hrbrthemes)
+library(extrafont)
+#extrafont::font_import()
+extrafont::loadfonts()
 
 #Import data
 setwd('C:/Mathis/SAFS/HEED') ##UPDATE##
@@ -179,7 +183,7 @@ multiAhisto <- function(data, pattern, xaxis, qstext=qs) {
   return(p)
 }
 
-likertformat <- function(datatext, datanum, pattern, diverging=FALSE, qstext=qs) {
+likertformat <- function(datatext, datanum, pattern, diverging=FALSE, qstext=qs, qsplit = '?') {
   datnumformat <- multiformat(datanum, pattern)
   if (diverging) {
     midlikert <- median(unique(as.numeric(as.character(datnumformat$value))), na.rm=T)
@@ -190,7 +194,7 @@ likertformat <- function(datatext, datanum, pattern, diverging=FALSE, qstext=qs)
   dattextformat <- multiformat(datatext, pattern)
   datjoin <- datnumformat[dattextformat, on=c('ResponseId', 'variable')]
   rowind <- grep(pattern, rownames(qstext))
-  qslikert <- data.frame(choices = tstrsplit(qstext[rowind, '1'], '?', fixed=T)[[2]])
+  qslikert <- data.frame(choices = tstrsplit(qstext[rowind, '1'], qsplit, fixed=T)[[2]])
   qslikert$levels <- as.numeric(rownames(qslikert))
   datjoinq <- datjoin[qslikert, on='levels']
   datjoinq[!is.na(value), `:=`(varmean=mean(value), N=.N), by = variable]
@@ -931,44 +935,106 @@ q16_2format_summary <- q16_2format[!is.na(value),{
 },by=variable]
 q16_2format_summaryattri <- q16_2format_summary[unique(q16_2format[,.(variable, value, i.value, choices, varmean, N)]),
                                                 on= c('variable','value'), nomatch=0] %>%
-  .[, frac2 := ifelse(value ==0, frac/2, frac)]
-
+  .[, frac2 := ifelse(value ==0, frac/2, frac)] %>%
+  .[, challengelabels := gsub('\\s*\\([^\\)]+\\)|^\\s*\\-\\s*', '', choices)] #format labels
 
 up <- q16_2format_summaryattri[value >= 0 & choices != ' - Other (please specify)',] %>%
-  .[, value := factor(value, levels= unique(value)[order(value)])]
+  .[, `:=`(value = factor(value, levels= unique(value[order(value)])),
+           respondent = paste0('Already teaching, N=', max(N)),
+           variable_short = substr(variable, str_length(variable), 50))]%>%
+  .[, variable_short := factor(variable_short, levels=unique(variable_short[order(varmean)]))]
 down <- q16_2format_summaryattri[value <= 0 & choices != ' - Other (please specify)',] %>%
-  .[, value := factor(value, levels= unique(value)[order(value)])]
-
-challengelabels <- gsub('\\s*\\([^\\)]+\\)|^\\s*\\-\\s*', '', 
-                        unique(q16_2format[choices != ' - Other (please specify)', choices])) #format labels
+  .[, `:=`(value = factor(value, levels= unique(value[order(value)])),
+           respondent = paste0('Already teaching, N=', max(N)),
+           variable_short = substr(variable, str_length(variable), 50))]%>%
+  .[, variable_short := factor(variable_short, levels=unique(variable_short[order(varmean)]))]
 
 #Inspect 'Others'
 heedteach[!(Q19.1 %in% c('','-99')),"Q16.2_8_TEXT", with=FALSE]
 
 #---- Plot out ----
-challengeplot <- ggplot(q16_2format_summaryattri[order(q16_2format_summaryattri$value, q16_2format_summaryattri$variable),]) + 
-  geom_bar(data = up, aes(x = variable, y = 100*frac2, fill = value),
+#up[order(varmean),unique(choices
+                         
+challengeplot <- ggplot() + 
+  geom_bar(data = up, aes(x = variable_short, y = 100*frac2, fill = value),
            stat = "identity", position = position_stack(reverse = TRUE)) + 
-  geom_bar(data = down, aes(x = variable, y = -100*frac2, fill = value),
+  geom_bar(data = down, aes(x = variable_short, y = -100*frac2, fill = value),
            stat = "identity", position = position_stack()) +
-  scale_x_discrete(name = 'Challenge', labels = str_wrap(challengelabels, width=10)) +
-  scale_y_continuous(name= '% of responses', expand=c(0,0), limits=c(-100,100), breaks=seq(-100,100,25),labels=commapos) +
+  geom_text(data=up, aes(x= variable_short, y = 0, label = round(varmean,2))) +
+  scale_x_discrete(name = 'Challenge', position = "top",
+                   labels = str_wrap(up[order(varmean),unique(challengelabels)], width=10)) +
+  scale_y_continuous(name= '% of responses', expand=c(0,0), limits=c(-100,100), 
+                     breaks=seq(-100,100,25),labels=commapos) +
   theme_classic() + 
   coord_flip() +
+  facet_wrap(~respondent, scales='free_y') +
   scale_fill_manual(values = c('#dfc27d', '#a6611a', '#f5f5f5', '#80cdc1', '#018571'), 
-                    labels= unique(q16_2format_summaryattri[order(value),]$i.value)) +
+                    labels= paste(c('-2','-1',' 0', ' 1',' 2'),
+                                  unique(q16_2format_summaryattri[order(q16_2format_summaryattri$value),]$i.value))) +
   theme(legend.title = element_blank(),
         #axis.title.y =  element_blank(),
         #axis.title.x =  element_blank(),
         panel.grid.major.x = element_line(color='lightgrey'),
-        legend.position = c(0.15, 0.15),
+        legend.position = c(0.15, 0.85),
         legend.background = element_blank(),
         text= element_text(size=12))
-challengeplot
 
-png('results/challenges.png', width=6, height=6, units='in', res=600)
-print(challengeplot)
+################ Q5.1-16.2 - Challenges across prospective and current instructors? ########
+#---- Format data ----
+q5_3format <- likertformat(heednoteach, heednumnoteach, 'Q5[.]3.*[^TEXT]$',diverging = TRUE)
+q5_3format_summary <- q5_3format[!is.na(value),{
+  tot = .N
+  .SD[,.(frac=.N/tot),by=value]
+},by=variable]
+q5_3format_summaryattri <- q5_3format_summary[unique(q5_3format[,.(variable, value, i.value, choices, varmean, N)]),
+                                                on= c('variable','value'), nomatch=0] %>%
+  .[, frac2 := ifelse(value ==0, frac/2, frac)] %>%
+  .[, challengelabels := gsub('\\s*\\([^\\)]+\\)|^\\s*\\-\\s*', '', choices)] #format labels
+
+
+up_prospect <- q5_3format_summaryattri[value >= 0 & choices != ' - Other (please specify)',] %>%
+  .[, `:=`(value = factor(value, levels= unique(value[order(value)])),
+           respondent = paste0('Prospective, N=', max(N)),
+           variable_short = substr(variable, str_length(variable), 50))] %>%
+  .[, variable_short := factor(variable_short, levels=unique(variable_short[order(varmean)]))]
+
+down_prospect <- q5_3format_summaryattri[value <= 0 & choices != ' - Other (please specify)',] %>%
+  .[, `:=`(value = factor(value, levels= unique(value[order(value)])),
+           respondent = paste0('Prospective, N=', max(N)),
+           variable_short = substr(variable, str_length(variable), 50))]%>%
+  .[, variable_short := factor(variable_short, levels=unique(variable_short[order(varmean)]))]
+
+#---- Plot out ----
+challengeplot_prospective <- ggplot() + 
+  geom_bar(data = up_prospect[order(varmean, value),],
+           aes(x = variable_short, y = 100*frac2, fill = value),
+           stat = "identity", position = position_stack(reverse = TRUE)) + 
+  geom_bar(data = down_prospect[order(varmean, value),],
+           aes(x = variable_short, y = -100*frac2, fill = value),
+           stat = "identity", position = position_stack()) +
+  geom_text(data=up_prospect, aes(x= variable_short, y = 0, label = round(varmean,2))) +
+  scale_x_discrete(name = 'Challenge', 
+                   labels = str_wrap(up_prospect[order(varmean),unique(challengelabels)], width=10)) +
+  scale_y_continuous(name= '% of responses', expand=c(0,0), limits=c(-100,100), breaks=seq(-100,100,25),labels=commapos) +
+  theme_classic() + 
+  coord_flip() +
+  scale_fill_manual(values = c('#dfc27d', '#a6611a', '#f5f5f5', '#80cdc1', '#018571'), 
+                    labels= paste(c('-2','-1',' 0', ' 1',' 2'),
+                                  unique(q5_3format_summaryattri[order(value),]$i.value))) +
+  facet_wrap(~respondent, scales='free_y') +
+  theme(legend.title = element_blank(),
+        axis.title.y =  element_blank(),
+        #axis.title.x =  element_blank(),
+        panel.grid.major.x = element_line(color='lightgrey'),
+        legend.position = 'none', #c(0.15, 0.15),
+        legend.background = element_blank(),
+        text= element_text(size=12))
+grid.arrange(challengeplot,challengeplot_prospective, ncol=2)
+
+pdf('results/challenges.pdf', width=12, height=6)
+grid.arrange(challengeplot,challengeplot_prospective, ncol=2)
 dev.off()
+
 
 ################ Q15.2 and Q15.8 student and teacher benefits ########################
 #---- Format data for student benefits ----
@@ -978,15 +1044,17 @@ q15_2format_summary <- q15_2format[!is.na(value),{
   .SD[,.(frac=.N/tot),by=value]
 },by=variable]
 q15_2format_summaryattri <- q15_2format_summary[unique(q15_2format[,.(variable, value, i.value, choices, varmean, N)]),
-                                              on= c('variable','value'), nomatch=0] %>%
-  .[data.frame(choices = unique(q15_2format_summaryattri[choices != ' - Other', choices]),
-               formatlabels = c('Field sampling', 'Lab. methods', 'Data analysis', 
-                             'Collaborative research','Scientific writing', 'Public speaking', 'Scientific process',
-                             'Networking w/ scientists','Relationship building w/ classmates', 'Increased topical interest', 'Awareness of nature'),
-               groupin = factor(c(rep('Hard skills', 3), rep('Soft skills', 4), rep('Personal growth', 4)), 
+                                              on= c('variable','value'), nomatch=0]
+q15_2format_summaryattri <- q15_2format_summaryattri[
+  data.frame(choices = unique(q15_2format_summaryattri[choices != ' - Other', choices]),
+             formatlabels = c('Field sampling', 'Lab. methods', 'Data analysis', 
+                              'Collaborative research','Scientific writing', 'Public speaking', 'Scientific process',
+                              'Networking w/ scientists','Relationship building w/ classmates', 'Increased topical interest', 'Awareness of nature'),
+             groupin = factor(c(rep('Hard skills', 3), rep('Soft skills', 4), rep('Personal growth', 4)), 
                               levels=c( 'Personal growth', 'Hard skills', 'Soft skills')),
-               groupout = rep('Benefits to students', 11)),
-               on='choices']
+             groupout = rep('Benefits to students', 11),
+             respondent = paste0('Already teaching', max(N))),
+  on='choices']
 
 q15_2format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(formatlabels[order(varmean)])))]
 #,groupin = factor(groupin,levels = unique(groupin)[order(-q15_2format_summaryattri[, mean(varmean), by=groupin]$V1)])
@@ -998,14 +1066,16 @@ q15_8format_summary <- q15_8format[!is.na(value),{
   .SD[,.(frac=.N/tot),by=value]
 },by=variable]
 q15_8format_summaryattri <- q15_8format_summary[unique(q15_8format[,.(variable, value, i.value, choices, varmean, N)]),
-                                                on= c('variable','value'), nomatch=0] %>%
-  .[data.frame(choices = unique(q15_8format_summaryattri[choices != ' - Other (please specify)', choices]),
-               formatlabels = c('Ideas & data for projects', 'Career advancement', 'Peer recognition', 
-                                'Mentoring students','Inspiration'),
-               groupin = factor(c(rep('Academic growth', 3), rep('Personal growth', 2)), 
-                                levels=c('Academic growth', 'Personal growth')),
-               groupout = rep('Benefits to instructors', 5)),
-    on='choices']
+                                                on= c('variable','value'), nomatch=0] 
+q15_8format_summaryattri <-  q15_8format_summaryattri[
+  data.frame(choices = unique(q15_8format_summaryattri[choices != ' - Other (please specify)', choices]),
+             formatlabels = c('Ideas & data for projects', 'Career advancement', 'Peer recognition', 
+                              'Mentoring students','Inspiration'),
+             groupin = factor(c(rep('Academic growth', 3), rep('Personal growth', 2)), 
+                              levels=c('Academic growth', 'Personal growth')),
+             groupout = rep('Benefits to instructors', 5),
+             respondent = paste0('Already teaching', max(N))),
+  on='choices']
 
 q15_8format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(formatlabels[order(varmean)])),
                                 groupin = factor(groupin, 
@@ -1016,14 +1086,17 @@ benefitplot <- ggplot(rbind(q15_2format_summaryattri, q15_8format_summaryattri),
                             (aes(x=formatlabels, y=100*frac, fill=interaction(factor(value), groupout)))) +
   geom_bar(stat="identity", alpha=0.8) + 
   #geom_bar(data = q15_8format_summaryattri[order(q15_8format_summaryattri$value, q15_8format_summaryattri$variable),], stat="identity", alpha=0.8) + 
-  scale_x_discrete(labels = function(x) str_wrap(x, width=15)) +
+  geom_text(aes(y = 5, label = paste0('Mean ', round(varmean,2))), hjust = 0) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width=20), position='top') +
   scale_y_continuous(name= '% of responses', expand=c(0,0)) +
   scale_fill_manual(values=c(brewer.pal(4, "RdPu"), brewer.pal(4, "YlGnBu")), 
-                    labels = rep(rev(levels(q15_2format_summaryattri$i.value)),2)) + 
+                    labels = paste(0:3, rep(rev(levels(q15_2format_summaryattri$i.value)),2))) + 
+  ggtitle(paste0('Already teaching, N=', max(q15_2format_summaryattri$N))) +
   coord_flip() +
   facet_grid(groupout*groupin~., scales ='free_y', space='free', switch='y') +
-  theme_ipsum() + 
-  theme(text = element_text(size=12), 
+  #theme_ipsum() + 
+  theme_minimal() +
+  theme(text = element_text(size=16), 
         axis.title.y = element_blank(),
         legend.title = element_blank(),
         axis.line = element_line(color='black', size=1),
@@ -1032,11 +1105,90 @@ benefitplot <- ggplot(rbind(q15_2format_summaryattri, q15_8format_summaryattri),
         strip.placement = 'outside',
         strip.text.y = element_text(face='bold'))
 
-pdf('results/benefits.pdf', width=6, height=8)
+# pdf('results/benefits.pdf', width=6, height=8)
 print(benefitplot)
-dev.off()
+# dev.off()
 #Quick formatting in inkscape afterward
 
+
+
+#---- Format data for prospective student benefits ----
+q5_1format <- likertformat(heednoteach, heednumnoteach, 'Q5[.]1.*[^TEXT]$', qsplit = ' - ')
+q5_1format_summary <- q5_1format[!is.na(value),{
+  tot = .N
+  .SD[,.(frac=.N/tot),by=value]
+},by=variable]
+q5_1format_summaryattri <- q5_1format_summary[unique(q5_1format[,.(variable, value, i.value, choices, varmean, N)]),
+                                                on= c('variable','value'), nomatch=0] 
+q5_1format_summaryattri <- q5_1format_summaryattri[
+  data.frame(choices = unique(q5_1format_summaryattri[choices != 'Other (please specify)', choices]),
+             formatlabels = c('Field sampling', 'Lab. methods', 'Data analysis', 
+                              'Collaborative research','Scientific writing', 'Public speaking', 'Scientific process',
+                              'Networking w/ scientists','Relationship building w/ classmates', 'Increased topical interest', 'Awareness of nature'),
+             groupin = factor(c(rep('Hard skills', 3), rep('Soft skills', 4), rep('Personal growth', 4)), 
+                              levels=c( 'Personal growth', 'Hard skills', 'Soft skills')),
+             groupout = rep('Benefits to students', 11),
+             respondent = paste0('Prospective', max(N))),
+  on='choices']
+
+q5_1format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(formatlabels[order(varmean)])))]
+#,groupin = factor(groupin,levels = unique(groupin)[order(-q5_1format_summaryattri[, mean(varmean), by=groupin]$V1)])
+
+#---- format data for prospective instructors' benefits ----
+q5_2format <- likertformat(heednoteach, heednumnoteach, 'Q5[.]2.*[^TEXT]$', qsplit = ' - ')
+q5_2format_summary <- q5_2format[!is.na(value),{
+  tot = .N
+  .SD[,.(frac=.N/tot),by=value]
+},by=variable]
+q5_2format_summaryattri <- q5_2format_summary[unique(q5_2format[,.(variable, value, i.value, choices, varmean, N)]),
+                                                on= c('variable','value'), nomatch=0] %>%
+  .[choices %in% unique(choices)[5:20], ]
+q5_2format_summaryattri <- q5_2format_summaryattri[
+  data.frame(choices = unique(q5_2format_summaryattri[choices != 'Other (please specify)', choices]),
+               formatlabels = c('Ideas & data for projects', 'Peer recognition', 'Career advancement', 
+                                'Mentoring students','Inspiration'),
+               groupin = factor(c(rep('Academic growth', 3), rep('Personal growth', 2)), 
+                                levels=c('Academic growth', 'Personal growth')),
+               groupout = rep('Benefits to instructors', 5),
+             respondent = paste0('Prospective', max(N))),
+    on='choices']
+
+q5_2format_summaryattri[, `:=`(formatlabels = factor(formatlabels, unique(formatlabels[order(varmean)])),
+                                groupin = factor(groupin, 
+                                                 levels = unique(groupin)[order(-q5_2format_summaryattri[, mean(varmean), by=groupin]$V1)]))]
+
+#---- Plot out ----
+benefitplot_prospect <- ggplot(rbind(q5_1format_summaryattri, q5_2format_summaryattri), 
+                      (aes(x=formatlabels, y=100*frac, fill=interaction(factor(value), groupout)))) +
+  geom_bar(stat="identity", alpha=0.8) + 
+  geom_text(aes(y = 5, label = paste0('Mean ', round(varmean,2))), hjust = 0) +
+  #geom_bar(data = q5_2format_summaryattri[order(q5_2format_summaryattri$value, q5_2format_summaryattri$variable),], stat="identity", alpha=0.8) + 
+  scale_x_discrete(labels = function(x) str_wrap(x, width=20)) +
+  scale_y_continuous(name= '% of responses', expand=c(0,0)) +
+  scale_fill_manual(values=c(brewer.pal(4, "RdPu"), brewer.pal(4, "YlGnBu")), 
+                    labels = paste(0:3, rep(rev(levels(q5_1format_summaryattri$i.value)),2))) + 
+  ggtitle(paste0('Prospective, N=', max(q5_1format_summaryattri$N))) +
+  coord_flip() +
+  facet_grid(groupout*groupin~., scales ='free_y', space='free', switch='y') +
+  #theme_ipsum() + 
+  theme_minimal() +
+  theme(text = element_text(size=16), 
+        axis.title.y = element_blank(),
+        legend.title = element_blank(),
+        axis.line = element_line(color='black', size=1),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank(),
+        strip.placement = 'outside',
+        strip.text.y = element_text(face='bold'))
+
+#pdf('results/benefits.pdf', width=6, height=8)
+print(benefitplot_prospect)
+#dev.off()
+#Quick formatting in inkscape afterward
+
+pdf('results/benefits_large.pdf', width=14, height=10)
+grid.arrange(benefitplot, benefitplot_prospect, ncol=2)
+dev.off()
 
 ################ Data availability and vulnerability ########################
 
