@@ -11,6 +11,7 @@ library(data.table)
 library(arsenal)
 library(stringr)
 library(sp)
+library(rgdal)
 library(leaflet)
 library(knitr)
 library(kableExtra)
@@ -521,13 +522,28 @@ heedteach[grep('(u[.]*s[.]*a*$)|(united.*states)', heedteach$X1_Q11.2, ignore.ca
 singleAplot(heedteach, 'X1_Q11.2') + theme(axis.text.x = element_text(angle=40, vjust=0.5))
 
 ################ Q11.3 - Please drag the pin to the field location as precisely as possible in the map below ##############
-heedteach[, c('lat', 'long') := tstrsplit(X1_Q11.3, ',', fixed=T),]
-heedteach[, long := as.numeric(str_extract(long, "[-+]?\\d+(\\.\\d+)?")),]
-heedteach[, lat := as.numeric(str_extract(lat, "[-+]?\\d+(\\.\\d+)?")),]
-heedteach[lat==-99 | long==-99, `:=`(lat=NA, long=NA)]
 
+fieldlocs <- multiformat(heedteach, pattern='Q11[.][34]') %>%
+  .[!(is.na(value) | value==''), ] %>%
+  .[, `:=`(mainq = substr(variable, 5,12), 
+           ite = substr(variable, 1,2))]
+fieldlocs_cast <- dcast(fieldlocs, ResponseId+ite~mainq, value.var='value') %>%
+  .[, c('lat', 'long') := tstrsplit(`11.3`, ',', fixed=T)] %>%
+  .[, `:=`(long = as.numeric(str_extract(long, "[-+]?\\d+(\\.\\d+)?")),
+           lat = as.numeric(str_extract(lat, "[-+]?\\d+(\\.\\d+)?")))] %>%
+  .[heedteach[, .(ResponseId, Q9.2_1)], on='ResponseId']
 
-flocs <- SpatialPoints(data.frame(heedteach[!is.na(long),long],heedteach[!is.na(long),lat]))
+#Unique field locations
+nrow(fieldlocs_cast[, unique(.(lat, long))])
+
+#Write geolocated data out
+flocs <- SpatialPointsDataFrame(coords=coordinates(data.frame(fieldlocs_cast[!is.na(long),long],
+                                                              fieldlocs_cast[!is.na(long),lat])),
+                                data = fieldlocs_cast[!is.na(long),],
+                                proj4string=CRS("+init=epsg:4326"))
+
+writeOGR(flocs, dsn='results/GIS', layer='fieldlocations2', driver='ESRI Shapefile')
+                                
 leaflet(data = flocs) %>% addTiles() %>%
   addMarkers(clusterOptions = markerClusterOptions())
 
@@ -1213,8 +1229,10 @@ dat <- heedteach[, (q18.4cols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), 
 check <- dat[, .SD, .SDcols = c('ResponseId', 'Q2.4', q18.4cols)] #Don't get why people said that they collected data, didn't keep them, and yet are currently sharing them. Ignore
 q18.4melt <- melt(dat, id.vars='ResponseId', measure.vars=q18.4cols) %>%
   .[!(value %in% c('', NA)),] %>%
-  .[ value =='Access through the national phenology network', value := 'Open online access'] %>%
-  .[ value =='Only for government agency partners and educational purpose', value := 'Only for government partners and education']
+  .[ value =='Access through the national phenology network', 
+     value := 'Open online access'] %>%
+  .[ value =='Only for government agency partners and educational purpose', 
+     value := 'Only for government partners and education']
 
 q18.4melt[, value := factor(value, 
                             levels = rev(c('Open online access', 'Only for government partners and education',
@@ -1237,8 +1255,10 @@ dat <- heedteach[, (q18.5cols) := lapply(.SD, function(x){x[x==-99] <- NA; x}), 
 check <- dat[, .SD, .SDcols = c('ResponseId', 'Q2.4', q18.5cols)]
 q18.5melt <- melt(dat, id.vars='ResponseId', measure.vars=q18.5cols) %>%
   .[!(value %in% c('', NA)),] %>%
-  .[ value =='Only for government agency partners and educational purpose', value := 'Only for government partners and education'] %>%
-  .[value %in% c('too busy at present; 1-2 y time',  'I am interested in sharing it, but not sure how the other more senior instructors feel.',
+  .[ value =='Only for government agency partners and educational purpose', 
+     value := 'Only for government partners and education'] %>%
+  .[value %in% c('too busy at present; 1-2 y time',  
+                 'I am interested in sharing it, but not sure how the other more senior instructors feel.',
                  'The data exists in student lab reports. Each report would have to be independantly combed through to recollect the data',
                  'Being used by other researchers at my institution and not up to me'), 
     value := 'Not able to share at the moment'] %>%
