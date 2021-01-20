@@ -264,14 +264,18 @@ likertstackedbar <- function(dataformat, diverging=FALSE, qstext=qs) {
 
 resize_heights <- function(g, heights = rep(1, length(idpanels))){
   idpanels <- unique(g$layout[grepl("panel",g$layout$name), "t"])
-  g$heights <- grid:::unit.list(g$heights)
+  if(getRversion() < "3.3.0"){
+    g$heights <- grid:::unit.list(g$heights)
+  }
   g$heights[idpanels] <- unit.c(do.call(unit, list(heights, 'null')))
   g
 }
 
 resize_widths <- function(g, widths = rep(1, length(idpanels))){
   idpanels <- unique(g$layout[grepl("panel",g$layout$name), "l"])
-  g$widths <- grid:::unit.list(g$widths)
+  if(getRversion() < "3.3.0"){
+    g$widths <- grid:::unit.list(g$widths)
+  }
   g$widths[idpanels] <- unit.c(do.call(unit, list(widths, 'null')))
   g
 }
@@ -676,7 +680,7 @@ durahist <- ggplot(heedteach, aes(x=dataduration)) +
   # geom_vline(xintercept=meacol) + 
   # annotate("text", x=meacol-binw/5, y=Inf, hjust=1.2, angle=90,
   #          label = paste('Mean:',round(meacol,1), 'years')) +
-  geom_vline(xintercept=medcol) + 
+  geom_vline(xintercept=medcol+3) + 
   annotate("text", x=medcol-1.5, y=Inf, hjust=1.2,  angle=90,
            label = paste('Median:',round(medcol,1), 'years')) +
   theme_classic() +
@@ -710,24 +714,28 @@ top <- ggplot(data=cumdat, aes(x=year)) +
 main <- ggplot(data=heedteach[Q2.5_1 != -99 & Q2.6_1 != -99,]) +
   geom_segment(aes(x=Q2.5_1, xend=Q2.6_1, y=as.numeric(ResponseId), yend=as.numeric(ResponseId), color=dataduration), size=1.2) +
   scale_y_continuous(expand=c(0,0), name='Number of classes') +
-  scale_color_distiller(palette='Spectral', name='Class duration') + 
   scale_x_continuous(expand=c(0,-0.5), name='Start and end years of data collection') + 
+  scale_color_distiller(palette='Spectral', name=str_wrap('Class duration (years)', 20)) +  
   # ggtitle(paste('Teaching Q2.5 and 2.6: In what year did data collection start and end. Number of respondents:', 
   #               heedteach[Q2.5_1 != -99 & Q2.6_1 != -99, .N], '/', heedteach[, .N])) + 
   annotation_custom(ggplotGrob(durahist), 
-                    xmin=1960, xmax=1990, 
-                    ymin=quantile(heedteach[,as.numeric(ResponseId)], .50), 
-                    ymax=quantile(heedteach[,as.numeric(ResponseId)], 0.95)) + 
+                    xmin=1958, xmax=1995, 
+                    ymin=quantile(heedteach[,as.numeric(ResponseId)], .52), 
+                    ymax=quantile(heedteach[,as.numeric(ResponseId)], 1)) + 
   theme_classic() +
-  theme(legend.position=c(0.25, 0.05),
+  theme(legend.position=c(0.30, 0.05),
         legend.direction="horizontal",
         legend.box.background = element_blank(),
         legend.background = element_blank(),
+        legend.title.align=1,
+        axis.text.x = element_text(size=11),
         axis.title.y = element_blank(),
+        axis.line.y = element_blank(),
         axis.text.y = element_blank(),
         axis.ticks.y = element_blank(),
+        plot.margin = unit(c(0.1,0.1,0.1,0.5), "cm"),
         panel.grid.major.x = element_line(color='lightgrey'),
-        panel.grid.minor.x = element_line(color='lightgrey'))
+        panel.grid.minor.x = element_blank()) #element_line(color='lightgrey'))
 
 #---- Side plot ----
 sidedat <- data.frame(year=2019,num=cumdat[year==2018, c(cumactive, cumend)],
@@ -749,7 +757,7 @@ rightside <- ggplot(sidedat, aes(x=year, y=num, fill=cat,
 
 #---- Plot out ----
 g <- gtable_cbind(ggplotGrob(main), ggplotGrob(rightside))
-png('results/startendyears.png', width=6, height=6, units='in', res=400)
+png('results/startendyears.png', width=4, height=6, units='in', res=600)
 grid.draw(resize_widths(g, c(20,1)))
 dev.off()
 
@@ -982,7 +990,7 @@ q15_2format_summary <- q15_2format[!is.na(value),{
 },by=variable]
 q15_2format_summaryattri <- q15_2format_summary[unique(q15_2format[,.(variable, value, i.value, choices, varmean, N)]),
                                               on= c('variable','value'), nomatch=0] %>%
-  .[data.frame(choices = unique(q15_2format_summaryattri[choices != ' - Other', choices]),
+  .[data.frame(choices = unique(.[choices != ' - Other', choices]),
                formatlabels = c('Field sampling', 'Lab. methods', 'Data analysis', 
                              'Collaborative research','Scientific writing', 'Public speaking', 'Scientific process',
                              'Networking w/ scientists','Relationship building w/ classmates', 'Increased topical interest', 'Awareness of nature'),
@@ -1000,9 +1008,10 @@ q15_8format_summary <- q15_8format[!is.na(value),{
   tot = .N
   .SD[,.(frac=.N/tot),by=value]
 },by=variable]
+
 q15_8format_summaryattri <- q15_8format_summary[unique(q15_8format[,.(variable, value, i.value, choices, varmean, N)]),
                                                 on= c('variable','value'), nomatch=0] %>%
-  .[data.frame(choices = unique(q15_8format_summaryattri[choices != ' - Other (please specify)', choices]),
+  .[data.frame(choices = unique(.[choices != ' - Other (please specify)', choices]),
                formatlabels = c('Ideas & data for projects', 'Career advancement', 'Peer recognition', 
                                 'Mentoring students','Inspiration'),
                groupin = factor(c(rep('Academic growth', 3), rep('Personal growth', 2)), 
